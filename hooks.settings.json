@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python3 ~/.claude/token-tracker/tracker.py hook", "async": true, "timeout": 30 } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "python3 ~/.claude/token-tracker/tracker.py hook", "async": true, "timeout": 30 } ] }
+    ]
+  }
+}
