@@ -1,6 +1,6 @@
 # claude-spend
 
-Estimates how much Claude Code spends in tokens and breaks it down by agent, project, model, day, session and task. You can read it as plain tables, in an interactive terminal view, or in a local web page. In both interactive views you click a column header to sort.
+Visualize Claude Code token usage in simple tables, either through an interactive terminal view or a local web page. In both interactive views, you can click on a column header to sort the data. Claude Code token usage is tracked and displayed, broken down by agent, project, model, day, session, and task.
 
 > **Unofficial.** This is an independent project. It is not affiliated with, endorsed by or supported by Anthropic. "Claude" and "Claude Code" are trademarks of their owners.
 
