@@ -26,6 +26,8 @@ import urllib.parse
 import webbrowser
 from collections import defaultdict
 
+__version__ = "0.1.0"
+
 BASE = os.path.expanduser("~/.claude/token-tracker")
 LOG = os.path.join(BASE, "token-log.jsonl")
 ERRLOG = os.path.join(BASE, "errors.log")
@@ -746,7 +748,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         url = urllib.parse.urlparse(self.path)
         try:
             if url.path == "/":
-                return self._send(200, PAGE, "text/html; charset=utf-8", {
+                return self._send(200, PAGE.replace("__VERSION__", __version__), "text/html; charset=utf-8", {
                     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
                                                "script-src 'unsafe-inline'; connect-src 'self'"})
             if url.path == "/api/report":
@@ -802,6 +804,7 @@ PAGE = r"""<!doctype html>
          font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width:1100px; margin:0 auto; }
   h1 { font-size:20px; margin:0 0 4px; }
+  .ver { font-size:13px; font-weight:400; color:var(--muted); }
   .sub { color:var(--muted); margin:0 0 20px; }
   .bar { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:end; margin-bottom:16px; }
   label { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); }
@@ -832,7 +835,7 @@ PAGE = r"""<!doctype html>
 </head>
 <body>
 <main>
-  <h1>Claude Spend</h1>
+  <h1>Claude Spend <span class="ver">v__VERSION__</span></h1>
   <p class="sub">Estimated Claude Code token spend at list price. Click a column header to sort.</p>
   <form class="bar" id="filters">
     <label>Since <input type="date" id="since"></label>
@@ -937,6 +940,7 @@ PAGE = r"""<!doctype html>
 def main():
     p = argparse.ArgumentParser(prog="claude-spend",
                                 description="Claude Code token spend by agent, project, model, day, session and task")
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("mode", nargs="?", default="report", choices=["report", "hook", "import"])
     p.add_argument("--import", dest="do_import", action="store_true",
                    help="import the transcripts on disk first")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-spend"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Visualize Claude Code token usage in simple tables, in an interactive terminal view or a local web page, broken down by agent, project, model, day, session and task"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -28,6 +28,9 @@ claude-spend = "claude_spend.tracker:main"
 
 [tool.setuptools]
 packages = ["claude_spend"]
+
+[tool.setuptools.dynamic]
+version = { attr = "claude_spend.tracker.__version__" }
 
 [tool.setuptools.package-data]
 claude_spend = ["prices.json"]
