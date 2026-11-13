@@ -147,16 +147,6 @@ class CostTests(Base):
         # "claude-fable-5-3" no es una variante de "claude-fable-5": mejor sin precio que un precio ajeno
         self.assertIsNone(self.tr.price_for("claude-fable-5-3", p))
 
-    def test_the_old_token_tracker_folder_is_used_if_the_new_one_is_missing(self):
-        home = tempfile.mkdtemp(prefix="claude-spend-test-")
-        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
-        old = Path(home) / ".claude" / "token-tracker"
-        old.mkdir(parents=True)
-        self.assertEqual(os.path.realpath(load_tracker(home).BASE), os.path.realpath(old))
-        (Path(home) / ".claude" / "claude-spend").mkdir()
-        self.assertEqual(os.path.realpath(load_tracker(home).BASE),
-                         os.path.realpath(Path(home) / ".claude" / "claude-spend"))
-
     def test_the_bundled_prices_are_used_when_the_user_has_no_prices_json(self):
         # instalación con pip/uv: nadie ha copiado prices.json a ~/.claude/claude-spend
         (self.base / "prices.json").unlink()
