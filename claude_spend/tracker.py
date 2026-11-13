@@ -26,7 +26,7 @@ import urllib.parse
 import webbrowser
 from collections import defaultdict
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 BASE = os.path.expanduser("~/.claude/claude-spend")
 LOG = os.path.join(BASE, "token-log.jsonl")
