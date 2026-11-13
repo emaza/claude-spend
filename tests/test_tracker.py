@@ -45,8 +45,9 @@ def load_tracker(home):
     return mod
 
 
-def usage(inp=0, out=0, cr=0, w5=0, w1=0, requests=1, key="requests"):
-    return {"input": inp, "output": out, "cache_read": cr, "cache_write_5m": w5, "cache_write_1h": w1, key: requests}
+def usage(inp=0, out=0, cr=0, w5=0, w1=0, requests=1):
+    return {"input": inp, "output": out, "cache_read": cr, "cache_write_5m": w5, "cache_write_1h": w1,
+            "requests": requests}
 
 
 class Base(unittest.TestCase):
@@ -85,50 +86,34 @@ def assistant(i, model, **tokens):
             "message": {"id": f"m{i}", "model": model, "usage": u}}
 
 
-class NormalizeTests(Base):
-    LEGACY = {"ts": "2026-11-01T10:00:00+01:00", "evento": "Stop", "session_id": "s1", "proyecto": "/work/demo",
-              "agent_id": "principal", "agente": "principal", "encargo": None, "titulo": "Hello",
-              "inicio": "2026-11-01T09:00:00Z", "fin": "2026-11-01T09:30:00Z",
-              "modelos": {"claude-opus-5-5": {**usage(1000, 100, requests=2, key="peticiones"),
-                                              "tramos": {"100000": usage(5, requests=1, key="peticiones")}}},
-              "coste_usd": 1.0}
+class SnapshotTests(Base):
+    """El log guarda "fotos" acumuladas; el informe se queda con una por (sesión, agente)."""
 
-    def test_legacy_keys_and_values_are_translated(self):
-        r = self.tr.normalize_record(self.LEGACY)
-        self.assertEqual(r["agent"], "main")
-        self.assertEqual(r["agent_id"], "main")
-        self.assertEqual(r["project"], "/work/demo")
-        self.assertEqual(r["title"], "Hello")
-        self.assertEqual(r["start"], "2026-11-01T09:00:00Z")
-        self.assertEqual(r["models"]["claude-opus-5-5"]["requests"], 2)
-        self.assertEqual(r["models"]["claude-opus-5-5"]["tiers"]["100000"]["requests"], 1)
-        self.assertNotIn("evento", r)
+    def snap(self, requests, agent_id="main", agent="main", ts="2026-11-02T10:00:00+01:00"):
+        return {"ts": ts, "event": "Stop", "session_id": "s1", "project": "/work/demo", "agent_id": agent_id,
+                "agent": agent, "task": None, "title": "Hello", "start": "2026-11-01T09:00:00Z",
+                "end": "2026-11-01T10:00:00Z",
+                "models": {"claude-opus-5-5": usage(1000 * requests, 100, requests=requests)}, "cost_usd": 0}
 
-    def test_original_record_is_not_modified(self):
-        self.tr.normalize_record(self.LEGACY)
-        self.assertEqual(self.LEGACY["agent_id"], "principal")
-
-    def test_new_format_is_left_alone(self):
-        new = {"agent_id": "main", "agent": "main", "models": {"m": usage(1)}}
-        self.assertEqual(self.tr.normalize_record(new), new)
-
-    def test_old_and_new_snapshots_of_the_same_session_are_not_counted_twice(self):
-        new = {"ts": "2026-11-02T10:00:00+01:00", "event": "Stop", "session_id": "s1", "project": "/work/demo",
-               "agent_id": "main", "agent": "main", "task": None, "title": "Hello",
-               "start": "2026-11-01T09:00:00Z", "end": "2026-11-01T10:00:00Z",
-               "models": {"claude-opus-5-5": usage(5000, 500, requests=10)}, "cost_usd": 0}
-        smaller = {**new, "models": {"claude-opus-5-5": usage(1, 1, requests=1)}}
-        self.write_log([self.LEGACY, new, smaller])
+    def test_the_fullest_snapshot_wins_and_repeats_are_not_counted_twice(self):
+        self.write_log([self.snap(2), self.snap(10), self.snap(1)])
         recs = self.tr.latest_records()
         self.assertEqual(len(recs), 1)  # una sola foto por (sesión, agente)
         self.assertEqual(recs[0]["models"]["claude-opus-5-5"]["requests"], 10)  # gana la más completa
 
-    def test_legacy_only_log_still_reports(self):
-        self.write_log([self.LEGACY])
-        out = self.run_cli("--by", "agent")
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("main", out.stdout)
-        self.assertNotIn("principal", out.stdout)
+    def test_on_a_tie_the_latest_snapshot_wins(self):
+        self.write_log([self.snap(3, ts="2026-11-02T10:00:00+01:00"), self.snap(3, ts="2026-11-03T10:00:00+01:00")])
+        self.assertEqual(self.tr.latest_records()[0]["ts"], "2026-11-03T10:00:00+01:00")
+
+    def test_different_agents_of_the_same_session_are_kept_apart(self):
+        self.write_log([self.snap(5), self.snap(7, agent_id="a1", agent="tester")])
+        self.assertEqual(sorted(r["agent"] for r in self.tr.latest_records()), ["main", "tester"])
+
+    def test_broken_lines_in_the_log_are_skipped(self):
+        self.write_log([self.snap(4)])
+        with open(self.base / "token-log.jsonl", "a", encoding="utf-8") as f:
+            f.write("this is not json\n")
+        self.assertEqual(len(self.tr.latest_records()), 1)
 
 
 class CostTests(Base):

@@ -86,7 +86,7 @@ Mouse clicks depend on the terminal: most modern ones work, but some report doub
 `claude-spend --web` serves the report on `http://127.0.0.1:8765` and opens it in your default browser. It only listens on your own machine and only reads the log; reloading the page (or pressing Refresh) recalculates it from the current data. The tables can be filtered by date and project. Press `Ctrl+C` to stop it.
 
 ## Data
-The log is stored in `~/.claude/token-tracker/token-log.jsonl`. That file has your data and is not uploaded to the repository. Records written by earlier versions, which used Spanish keys, are read transparently.
+The log is stored in `~/.claude/token-tracker/token-log.jsonl`. That file has your data and is not uploaded to the repository. It is append-only: each line is a snapshot of one agent in one session, and the report keeps the latest one. Keep this file if you want a long-term history, because Claude Code deletes old transcripts after a while and `--import` can only rebuild what is still on disk.
 
 The amounts are an estimate at list price. If you use a Pro or Max subscription, it is not what you pay. Prices change: check `prices.json` against [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and update it (and `_price_date`) when they do; the report warns when the prices are more than 90 days old.
 

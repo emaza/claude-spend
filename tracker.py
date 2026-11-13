@@ -40,15 +40,6 @@ TITLE_WIDTH = 30
 DEFAULT_PORT = 8765
 NO_RECORDS = "No records. Run `claude-spend --import` to load the existing transcripts."
 
-# El log antiguo usaba claves y valores en español; se normalizan al leer (ver normalize_record).
-LEGACY_KEYS = {
-    "evento": "event", "proyecto": "project", "agente": "agent", "encargo": "task", "titulo": "title",
-    "inicio": "start", "fin": "end", "modelos": "models", "coste_usd": "cost_usd",
-    "modelos_sin_precio": "models_without_price",
-}
-LEGACY_USAGE_KEYS = {"peticiones": "requests", "tramos": "tiers"}
-LEGACY_VALUES = {"principal": "main", "desconocido": "unknown"}
-
 
 # ---------------------------------------------------------------- transcripts
 def parse_transcript(path, skip_sidechain=False, prices=None):
@@ -116,14 +107,9 @@ def parse_transcript(path, skip_sidechain=False, prices=None):
 def load_prices():
     try:
         with open(PRICES, encoding="utf-8") as f:
-            prices = {k: v for k, v in json.load(f).items() if not k.startswith("_")}
+            return {k: v for k, v in json.load(f).items() if not k.startswith("_")}
     except (OSError, ValueError):
         return {}
-    for p in prices.values():  # prices.json antiguo: "tramos" / "prompt_mas_de"
-        if "tramos" in p and "tiers" not in p:
-            p["tiers"] = [{("prompt_over" if k == "prompt_mas_de" else k): v for k, v in t.items()}
-                          for t in p["tramos"]]
-    return prices
 
 
 def price_for(model, prices):
@@ -151,7 +137,7 @@ def tier_for(p, prompt):
 def prices_note():
     """Línea para el informe con la fecha de los precios y aviso si son antiguos."""
     meta = read_json(PRICES)
-    date = meta.get("_price_date") or meta.get("_fecha_precios")
+    date = meta.get("_price_date")
     if not date:
         return "Prices: no date in prices.json (add \"_price_date\")."
     line = f"List prices as of {date}"
@@ -162,7 +148,7 @@ def prices_note():
             line += " ⚠ worth reviewing"
     except ValueError:
         pass
-    return line + ". Source: " + (meta.get("_source") or meta.get("_fuente") or "-")
+    return line + ". Source: " + meta.get("_source", "-")
 
 
 def cost(models, prices):
@@ -274,36 +260,13 @@ def cmd_import(_args):
 
 
 # -------------------------------------------------------------------- report
-def normalize_record(r):
-    """Registro del log (formato antiguo o nuevo) en el formato nuevo, sin tocar el original.
-
-    Debe aplicarse ANTES de usar (session_id, agent_id) como clave: los registros antiguos
-    llevan agent_id "principal" y los nuevos "main"; sin normalizar contarían doble.
-    """
-    out = {LEGACY_KEYS.get(k, k): v for k, v in r.items()}
-    for k in ("agent", "agent_id"):
-        if out.get(k) in LEGACY_VALUES:
-            out[k] = LEGACY_VALUES[out[k]]
-
-    def usage(t):
-        t = {LEGACY_USAGE_KEYS.get(k, k): v for k, v in t.items()}
-        if "tiers" in t:
-            t["tiers"] = {th: {LEGACY_USAGE_KEYS.get(k, k): v for k, v in tt.items()}
-                          for th, tt in t["tiers"].items()}
-        return t
-
-    if "models" in out:
-        out["models"] = {m: usage(t) for m, t in out["models"].items()}
-    return out
-
-
 def latest_records():
     latest = {}
     try:
         with open(LOG, encoding="utf-8") as f:
             for line in f:
                 try:
-                    r = normalize_record(json.loads(line))
+                    r = json.loads(line)
                 except ValueError:
                     continue
                 key = (r.get("session_id"), r.get("agent_id"))
