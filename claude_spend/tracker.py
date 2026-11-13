@@ -802,7 +802,7 @@ PAGE = r"""<!doctype html>
   * { box-sizing: border-box; }
   body { margin:0; padding:24px 16px 48px; background:var(--bg); color:var(--fg);
          font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width:1100px; margin:0 auto; }
+  main { width:max-content; min-width:min(1100px, 100%); max-width:100%; margin:0 auto; }
   h1 { font-size:20px; margin:0 0 4px; }
   .ver { font-size:13px; font-weight:400; color:var(--muted); }
   .sub { color:var(--muted); margin:0 0 20px; }
