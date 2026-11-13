@@ -368,7 +368,14 @@ class WebTests(Base):
         status, html = self.get("/")
         self.assertEqual(status, 200)
         self.assertIn("Claude Spend", html)
-        self.assertNotIn("innerHTML", html)  # los títulos vienen de los transcripts: solo textContent
+        self.assertIn(f"v{self.tr.__version__}", html)
+        self.assertNotIn("__", html)  # todos los marcadores sustituidos
+        status, js = self.get("/main.js")
+        self.assertEqual(status, 200)
+        self.assertNotIn("innerHTML", js)  # los títulos vienen de los transcripts: solo textContent
+        self.assertEqual(self.get("/styles.css")[0], 200)
+        for path in ("/tracker.py", "/../tracker.py", "/web/main.js", "/index.html"):
+            self.assertEqual(self.get(path)[0], 404, path)
         status, body = self.get("/api/report")
         data = json.loads(body)
         self.assertEqual(status, 200)

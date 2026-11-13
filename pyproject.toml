@@ -33,4 +33,4 @@ packages = ["claude_spend"]
 version = { attr = "claude_spend.tracker.__version__" }
 
 [tool.setuptools.package-data]
-claude_spend = ["prices.json"]
+claude_spend = ["prices.json", "web/*"]
