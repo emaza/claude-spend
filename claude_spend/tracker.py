@@ -187,8 +187,26 @@ def read_json(path):
         return {}
 
 
+def main_agent_name(path):
+    """Agente con el que se lanzó la sesión (claude --agent X queda como "agentSetting"), o "main"."""
+    name = None
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if '"agentSetting"' in line:
+                    try:
+                        name = json.loads(line).get("agentSetting") or name
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    return name or MAIN
+
+
 def record_for(transcript, session_id, agent_id, agent_type, description, event, cwd=None):
     prices = load_prices()
+    if agent_id == MAIN:
+        agent_type = main_agent_name(transcript)  # agent_id sigue siendo "main": es la clave del registro
     models, tcwd, first, last, title = parse_transcript(transcript, skip_sidechain=(agent_id == MAIN), prices=prices)
     if not models:
         return None

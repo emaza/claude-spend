@@ -327,6 +327,15 @@ class HookTests(Base):
         self.assertAlmostEqual(r["cost_usd"], 0.0775, places=6)
         self.assertIn("requests", r["models"]["claude-haiku-5-5"])
 
+    def test_a_session_started_with_an_agent_is_recorded_under_that_agent(self):
+        t = self.write_transcript([{"type": "agent-setting", "agentSetting": "cto"},
+                                   assistant(1, "claude-haiku-5-5", inp=1000, out=10)])
+        payload = json.dumps({"hook_event_name": "Stop", "session_id": "abcdef12-0001",
+                              "transcript_path": str(t), "cwd": "/work/demo"})
+        self.assertEqual(self.run_cli("hook", stdin=payload).returncode, 0)
+        r = json.loads((self.base / "token-log.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual((r["agent"], r["agent_id"]), ("cto", "main"))
+
     def test_a_broken_hook_never_fails_and_logs_the_error(self):
         out = self.run_cli("hook", stdin="not json")
         self.assertEqual(out.returncode, 0)
