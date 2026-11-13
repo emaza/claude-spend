@@ -876,7 +876,7 @@ PAGE = r"""<!doctype html>
 <body>
 <main>
   <h1>Claude Spend <span class="ver">v__VERSION__</span></h1>
-  <p class="sub">Estimated Claude Code token spend at list price. Click a column header to sort, or a row to see only what is in it.</p>
+  <p class="sub">Estimated Claude Code token spend at list price. Click a column header to sort, or a row to filter every table by it.</p>
   <form class="bar" id="filters">
     <label>Since <input type="date" id="since"></label>
     <label>Project contains <input type="text" id="project" placeholder="any"></label>
@@ -951,9 +951,8 @@ PAGE = r"""<!doctype html>
     $("project").value = q.get("project") || "";
   }
 
-  function drill(by, value) {   // a row was clicked: keep only that row's records and show what is inside
+  function drill(by, value) {   // a row was clicked: keep only that row's records; the tab stays the same
     filters[by] = value;
-    tab = by === "session" ? "task" : "session";
     writeUrl(true); load();
   }
 
