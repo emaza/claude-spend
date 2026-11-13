@@ -12,9 +12,9 @@ Everything runs on your machine: it reads the transcripts Claude Code already ke
 Python 3.9 or newer. No third-party packages. The interactive terminal view needs `curses`, which comes with Python on Linux and macOS but not on Windows.
 
 ## Platform support
-So far I have only used claude-spend by hand on **Linux**, with Python 3.11, 3.12 and 3.14. It only uses the standard library, so it should work on macOS and Windows too, but I haven't been able to try it there. The test suite also runs in CI on Linux, macOS and Windows (Python 3.9, 3.11 and 3.13).
+claude-spend is developed and used day to day on **Linux**. The automated tests pass on Linux, macOS and Windows, with Python 3.9, 3.11 and 3.13, and CI also checks that the package builds and installs.
 
-If you run it on another system, I'd really appreciate your help testing it. Let me know how it goes, whether that's "it works" or a bug report, by opening an issue or a pull request. Improvements of any kind are welcome.
+What the tests don't cover is real-world use on macOS and Windows: the Claude Code hooks, the interactive terminal view with the mouse, and the web page in your browser. I have only tried those by hand on Linux, so I'd really appreciate your help testing them on other systems. Let me know how it goes, whether that's "it works" or a bug report, by opening an issue or a pull request. Improvements of any kind are welcome.
 
 ## Files
 - `claude_spend/tracker.py`: the log and the report (standard library only).
@@ -51,7 +51,7 @@ Then add this to `~/.claude/settings.json`. Merge it with what you already have;
 
 If Claude Code can't find the command, use its full path in `"command"`. You can get it with `which claude-spend` (`Get-Command claude-spend` in PowerShell).
 
-### Manual install (Linux, and probably macOS)
+### Manual install (Linux and macOS)
 ```bash
 git clone https://github.com/emaza/claude-spend.git
 cd claude-spend
@@ -61,8 +61,8 @@ cp claude-spend ~/.local/bin/ && chmod +x ~/.local/bin/claude-spend
 ```
 Then add the `hooks` block from `hooks.settings.json` to `~/.claude/settings.json`, merging it as above. Always copy `tracker.py` and `prices.json` together.
 
-### Windows (untested)
-Neither method has been tested on Windows by hand, and I'd expect the `uv` or `pipx` route to be the easier one. Please open an issue if something doesn't work.
+### Windows
+The tests pass on Windows, but I haven't tried the install steps, the hooks or the terminal view there by hand, and I'd expect the `uv` or `pipx` route to be the easier one. Please open an issue if something doesn't work.
 
 If you prefer not to use `uv` or `pipx`, you can copy the files yourself. The `claude-spend` wrapper is a shell script, so on Windows run the tracker directly (use `py -3` instead of `python` if that's how you start Python):
 
@@ -123,7 +123,7 @@ python3 -m unittest discover -s tests
 The tests use a temporary home directory (they set both `HOME` and `USERPROFILE`, and stop if that doesn't take effect), so they never touch your real `~/.claude`.
 
 ## Contributing
-Bug reports, ideas and pull requests are all welcome. Reports from macOS and Windows are especially useful, since that's where it hasn't been tested. If you send a pull request, please run the tests first.
+Bug reports, ideas and pull requests are all welcome. Reports from macOS and Windows are especially useful, since I have only used it by hand on Linux. If you send a pull request, please run the tests first.
 
 ## License
 [MIT](LICENSE)
