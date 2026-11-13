@@ -8,7 +8,7 @@ Usage:
   tracker.py --interactive         # tables in the terminal; click a header to sort
   tracker.py --web                 # tables in a local web page; click a header to sort
 
-The log lives in ~/.claude/token-tracker/token-log.jsonl. Each line is a cumulative
+The log lives in ~/.claude/claude-spend/token-log.jsonl. Each line is a cumulative
 "snapshot" of one agent in one session; the report keeps the latest snapshot of every
 (session, agent), so repeating records does not duplicate the spend.
 """
@@ -26,9 +26,12 @@ import urllib.parse
 import webbrowser
 from collections import defaultdict
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-BASE = os.path.expanduser("~/.claude/token-tracker")
+BASE = os.path.expanduser("~/.claude/claude-spend")
+OLD_BASE = os.path.expanduser("~/.claude/token-tracker")  # nombre anterior a 0.2.0
+if not os.path.isdir(BASE) and os.path.isdir(OLD_BASE):
+    BASE = OLD_BASE  # instalaciones antiguas siguen funcionando hasta que muevan la carpeta
 LOG = os.path.join(BASE, "token-log.jsonl")
 ERRLOG = os.path.join(BASE, "errors.log")
 PRICES = os.path.join(BASE, "prices.json")  # el del usuario: si existe, manda

@@ -1,2 +1,2 @@
 #!/bin/sh
-exec python3 "$HOME/.claude/token-tracker/tracker.py" "$@"
+exec python3 "$HOME/.claude/claude-spend/tracker.py" "$@"

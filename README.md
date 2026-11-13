@@ -4,7 +4,7 @@ Visualize Claude Code token usage in simple tables, either through an interactiv
 
 > **Unofficial.** This is an independent project. It is not affiliated with, endorsed by or supported by Anthropic. "Claude" and "Claude Code" are trademarks of their owners.
 
-Everything runs on your machine: it reads the transcripts Claude Code already keeps in `~/.claude/projects` and writes only to `~/.claude/token-tracker/`. Nothing is sent anywhere.
+Everything runs on your machine: it reads the transcripts Claude Code already keeps in `~/.claude/projects` and writes only to `~/.claude/claude-spend/`. Nothing is sent anywhere.
 
 ![The claude-spend web page: a sortable table of estimated spend by agent, with tabs for project, model, day, session and task](docs/screenshot.png)
 
@@ -55,8 +55,8 @@ If Claude Code can't find the command, use its full path in `"command"`. You can
 ```bash
 git clone https://github.com/emaza/claude-spend.git
 cd claude-spend
-mkdir -p ~/.claude/token-tracker ~/.local/bin
-cp claude_spend/tracker.py claude_spend/prices.json ~/.claude/token-tracker/
+mkdir -p ~/.claude/claude-spend ~/.local/bin
+cp claude_spend/tracker.py claude_spend/prices.json ~/.claude/claude-spend/
 cp claude-spend ~/.local/bin/ && chmod +x ~/.local/bin/claude-spend
 ```
 Then add the `hooks` block from `hooks.settings.json` to `~/.claude/settings.json`, merging it as above. Always copy `tracker.py` and `prices.json` together.
@@ -69,12 +69,12 @@ If you prefer not to use `uv` or `pipx`, you can copy the files yourself. The `c
 ```powershell
 git clone https://github.com/emaza/claude-spend.git
 cd claude-spend
-New-Item -ItemType Directory -Force "$HOME\.claude\token-tracker" | Out-Null
-Copy-Item claude_spend\tracker.py, claude_spend\prices.json "$HOME\.claude\token-tracker\"
-python "$HOME\.claude\token-tracker\tracker.py" --web
+New-Item -ItemType Directory -Force "$HOME\.claude\claude-spend" | Out-Null
+Copy-Item claude_spend\tracker.py, claude_spend\prices.json "$HOME\.claude\claude-spend\"
+python "$HOME\.claude\claude-spend\tracker.py" --web
 ```
 
-For the hooks, copy the `hooks` block from `hooks.settings.json`, but change the command so it works on your system, with the full path to the script. For example: `python "C:/Users/you/.claude/token-tracker/tracker.py" hook`.
+For the hooks, copy the `hooks` block from `hooks.settings.json`, but change the command so it works on your system, with the full path to the script. For example: `python "C:/Users/you/.claude/claude-spend/tracker.py" hook`.
 
 The interactive terminal view (`--interactive`) needs `curses`. You can try `pip install windows-curses`. Without it, claude-spend prints the plain report instead, and `--web` works either way.
 
@@ -110,11 +110,17 @@ Mouse clicks depend on the terminal: most modern ones work, but some report doub
 `claude-spend --web` serves the report on `http://127.0.0.1:8765` and opens it in your default browser. It only listens on your own machine and only reads the log; reloading the page (or pressing Refresh) recalculates it from the current data. The tables can be filtered by date and project. Press `Ctrl+C` to stop it.
 
 ## Data
-The log is stored in `~/.claude/token-tracker/token-log.jsonl`. That file has your data and is not uploaded to the repository. It is append-only: each line is a snapshot of one agent in one session, and the report keeps the latest one. Keep this file if you want a long-term history, because Claude Code deletes old transcripts after a while and `--import` can only rebuild what is still on disk.
+The log is stored in `~/.claude/claude-spend/token-log.jsonl`. That file has your data and is not uploaded to the repository. It is append-only: each line is a snapshot of one agent in one session, and the report keeps the latest one. Keep this file if you want a long-term history, because Claude Code deletes old transcripts after a while and `--import` can only rebuild what is still on disk.
 
 The amounts are an estimate at list price. If you use a Pro or Max subscription, it is not what you pay. Prices change: check `prices.json` against [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and update it (and `_price_date`) when they do; the report warns when the prices are more than 90 days old.
 
-claude-spend uses `~/.claude/token-tracker/prices.json` if that file exists, and otherwise the `prices.json` that comes with the package. To use your own prices, copy the bundled file to `~/.claude/token-tracker/prices.json` and edit that copy. It replaces the bundled list completely; the two are not merged.
+claude-spend uses `~/.claude/claude-spend/prices.json` if that file exists, and otherwise the `prices.json` that comes with the package. To use your own prices, copy the bundled file to `~/.claude/claude-spend/prices.json` and edit that copy. It replaces the bundled list completely; the two are not merged.
+
+### Upgrading from 0.1.x
+Before 0.2.0 the data folder was `~/.claude/token-tracker`. It still works if it's the only one there, but move it to the new name and update the paths in your hooks (and in `~/.local/bin/claude-spend` if you used the manual install):
+```bash
+mv ~/.claude/token-tracker ~/.claude/claude-spend
+```
 
 ## Tests
 ```bash
