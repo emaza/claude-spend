@@ -1,6 +1,7 @@
 """Tests de claude-spend (solo librería estándar): python3 -m unittest discover -s tests
 
-Todos usan un HOME temporal, así que nunca leen ni escriben en ~/.claude.
+Todos usan un directorio personal temporal (HOME y USERPROFILE, que es lo que mira Python en
+Windows), así que nunca leen ni escriben en ~/.claude. Base.setUp lo comprueba antes de escribir nada.
 """
 import http.client
 import http.server
@@ -20,19 +21,27 @@ TRACKER = ROOT / "tracker.py"
 PRICES = ROOT / "prices.json"
 
 
+HOME_VARS = ("HOME", "USERPROFILE")  # Linux/macOS leen HOME; Windows, USERPROFILE
+
+
+def home_env(home):
+    return {name: str(home) for name in HOME_VARS}
+
+
 def load_tracker(home):
-    """Importa tracker.py con HOME=home (las rutas se calculan al importar)."""
-    old = os.environ.get("HOME")
-    os.environ["HOME"] = str(home)
+    """Importa tracker.py con el directorio personal = home (las rutas se calculan al importar)."""
+    old = {name: os.environ.get(name) for name in HOME_VARS}
+    os.environ.update(home_env(home))
     try:
         spec = importlib.util.spec_from_file_location(f"tracker_{abs(hash(str(home)))}", TRACKER)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
     finally:
-        if old is None:
-            os.environ.pop("HOME", None)
-        else:
-            os.environ["HOME"] = old
+        for name, value in old.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
     return mod
 
 
@@ -44,18 +53,22 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.mkdtemp(prefix="claude-spend-test-")
         self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        self.tr = load_tracker(self.home)
+        # red de seguridad: si el directorio personal no se aísla, los tests no deben escribir nada
+        home, base = os.path.realpath(self.home), os.path.realpath(self.tr.BASE)
+        if os.path.commonpath([home, base]) != home:
+            self.fail(f"the tests would use {base} instead of a temporary directory; aborting")
         self.base = Path(self.home) / ".claude" / "token-tracker"
         self.base.mkdir(parents=True)
         shutil.copy(PRICES, self.base / "prices.json")
-        self.tr = load_tracker(self.home)
 
     def write_log(self, records):
         with open(self.base / "token-log.jsonl", "w", encoding="utf-8") as f:
             for r in records:
                 f.write(json.dumps(r) + "\n")
 
-    def run_cli(self, *args, stdin=""):
-        env = dict(os.environ, HOME=self.home)
+    def run_cli(self, *args, stdin="", env=None):
+        env = {**os.environ, **home_env(self.home), **(env or {})}
         return subprocess.run([sys.executable, str(TRACKER), *args], input=stdin, capture_output=True,
                               text=True, env=env)
 
@@ -270,6 +283,33 @@ class CliTests(Base):
         self.assertIn("s2", out)
         self.assertNotIn("s1  ", out)
         self.assertIn("No records", self.run_cli("--project", "does-not-exist").stdout)
+
+
+class PlatformTests(Base):
+    def test_project_name_handles_unix_and_windows_paths(self):
+        for path, expected in [("/home/me/work/demo", "demo"), ("/home/me/work/demo/", "demo"),
+                               ("C:\\Users\\me\\proj", "proj"), ("C:\\Users\\me\\proj\\", "proj"),
+                               ("C:/Users/me/proj", "proj"), ("/", "?"), ("", "?"), (None, "?")]:
+            self.assertEqual(self.tr.project_name(path), expected, path)
+
+    def test_interactive_without_curses_falls_back_to_the_plain_report(self):
+        # en Windows `import curses` falla; se simula con un módulo curses que no se puede importar
+        fake = Path(self.home) / "fake"
+        fake.mkdir()
+        (fake / "curses.py").write_text("raise ImportError('No module named _curses')\n")
+        self.write_log([record("s1", "main", "main", {"claude-opus-5-5": usage(1)})])
+        out = self.run_cli("--interactive", "--by", "agent", env={"PYTHONPATH": str(fake)})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("not available here", out.stderr)
+        self.assertIn("== Spend by agent", out.stdout)
+
+    def test_output_survives_a_console_that_cannot_encode_the_symbols(self):
+        # la fila de sesión usa "→" y el aviso de modelos sin precio usa "⚠"
+        self.write_log([record("s1", "main", "main", {"unpriced-model": usage(1)},
+                               start="2026-11-01T09:00:00Z", end="2026-11-03T09:00:00Z")])
+        out = self.run_cli("--by", "session", env={"PYTHONIOENCODING": "ascii"})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("Models without a price", out.stdout)
 
 
 class HookTests(Base):

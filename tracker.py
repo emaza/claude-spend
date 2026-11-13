@@ -336,11 +336,17 @@ def human(n):
     return str(int(n))
 
 
+def project_name(path):
+    """Última carpeta de la ruta del proyecto; vale para rutas con / y con \\ (Windows)."""
+    parts = [p for p in re.split(r"[\\/]+", path or "") if p]
+    return parts[-1] if parts else "?"
+
+
 def group_key(r, by):
     if by == "agent":
         return r.get("agent") or "?"
     if by == "project":
-        return os.path.basename((r.get("project") or "?").rstrip("/")) or "?"
+        return project_name(r.get("project"))
     if by == "day":
         return (r.get("end") or r.get("ts") or "?")[:10]
     if by == "session":
@@ -715,14 +721,19 @@ def cmd_interactive(args):
         print(NO_RECORDS)
         return 0
     tables = [build_table(by, records, prices) for by in by_list_for(args)]
+    try:
+        import curses  # no viene con Python en Windows
+    except ImportError as e:
+        print(f"The interactive mode is not available here ({e}); printing the plain report instead.",
+              file=sys.stderr)
+        return cmd_report(args)
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("--interactive needs a terminal; printing the plain report instead.", file=sys.stderr)
         return cmd_report(args)
     try:
-        import curses
         os.environ.setdefault("ESCDELAY", "25")
         curses.wrapper(tui_main, tables, parsed)
-    except (ImportError, curses.error) as e:
+    except curses.error as e:
         print(f"The interactive mode is not available here ({e}); printing the plain report instead.",
               file=sys.stderr)
         return cmd_report(args)
@@ -973,6 +984,9 @@ def main():
     p.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"port for --web (default {DEFAULT_PORT})")
     p.add_argument("--no-open", action="store_true", help="with --web, do not open the browser")
     args = p.parse_args()
+    for stream in (sys.stdout, sys.stderr):  # una consola con codificación antigua no debe romper con → ▲ ⚠
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     if args.interactive and args.web:
         p.error("--interactive and --web cannot be used together")
     if args.mode == "hook":

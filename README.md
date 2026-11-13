@@ -9,7 +9,12 @@ Everything runs on your machine: it reads the transcripts Claude Code already ke
 ![The claude-spend web page: a sortable table of estimated spend by agent, with tabs for project, model, day, session and task](docs/screenshot.png)
 
 ## Requirements
-Python 3.9 or newer (tested on 3.11, 3.12 and 3.14). No third-party packages. The interactive terminal view needs `curses`, which ships with Python on Linux and macOS.
+Python 3.9 or newer. No third-party packages. The interactive terminal view needs `curses`, which comes with Python on Linux and macOS but not on Windows.
+
+## Platform support
+So far claude-spend has only been tested on **Linux**, with Python 3.11, 3.12 and 3.14. It only uses the standard library, so it should work on macOS and Windows too, but I haven't been able to try it there.
+
+If you run it on another system, I'd really appreciate your help testing it. Let me know how it goes, whether that's "it works" or a bug report, by opening an issue or a pull request. Improvements of any kind are welcome.
 
 ## Files
 - `tracker.py`: the log and the report (standard library only).
@@ -26,6 +31,28 @@ cp tracker.py prices.json ~/.claude/token-tracker/
 cp claude-spend ~/.local/bin/ && chmod +x ~/.local/bin/claude-spend
 ```
 Then add the `hooks` block from `hooks.settings.json` to `~/.claude/settings.json`. Merge it with what you already have; do not replace the file. Always install `tracker.py` and `prices.json` together.
+
+These steps are for Linux, and should also work on macOS (untested).
+
+### Windows (untested)
+The steps below have not been tested on Windows. Please open an issue if something doesn't work.
+
+```powershell
+git clone https://github.com/emaza/claude-spend.git
+cd claude-spend
+New-Item -ItemType Directory -Force "$HOME\.claude\token-tracker" | Out-Null
+Copy-Item tracker.py, prices.json "$HOME\.claude\token-tracker\"
+```
+
+The `claude-spend` wrapper is a shell script, so on Windows run the tracker directly (use `py -3` instead of `python` if that's how you start Python):
+
+```powershell
+python "$HOME\.claude\token-tracker\tracker.py" --web
+```
+
+For the hooks, copy the `hooks` block from `hooks.settings.json` as above, but change the command so it works on your system, with the full path to the script. For example: `python "C:/Users/you/.claude/token-tracker/tracker.py" hook`.
+
+The interactive terminal view (`--interactive`) needs `curses`. You can try `pip install windows-curses`. Without it, claude-spend prints the plain report instead, and `--web` works either way.
 
 ## Usage
 ```bash
@@ -67,7 +94,10 @@ The amounts are an estimate at list price. If you use a Pro or Max subscription,
 ```bash
 python3 -m unittest discover -s tests
 ```
-The tests use a temporary home directory, so they never touch `~/.claude`.
+The tests use a temporary home directory (they set both `HOME` and `USERPROFILE`, and stop if that doesn't take effect), so they never touch your real `~/.claude`.
+
+## Contributing
+Bug reports, ideas and pull requests are all welcome. Reports from macOS and Windows are especially useful, since that's where it hasn't been tested. If you send a pull request, please run the tests first.
 
 ## License
 [MIT](LICENSE)
