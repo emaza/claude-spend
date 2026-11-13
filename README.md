@@ -112,6 +112,8 @@ Mouse clicks depend on the terminal: most modern ones work, but some report doub
 ## Data
 The log is stored in `~/.claude/claude-spend/token-log.jsonl`. That file has your data and is not uploaded to the repository. It is append-only: each line is a snapshot of one agent in one session, and the report keeps the latest one. Keep this file if you want a long-term history, because Claude Code deletes old transcripts after a while and `--import` can only rebuild what is still on disk.
 
+Running `--import` again is safe: it never counts a session twice. The total can still go up afterwards, because it picks up sessions the hooks did not record (for example, ones from before you installed them) and completes sessions whose last record was cut short.
+
 The amounts are an estimate at list price. If you use a Pro or Max subscription, it is not what you pay. Prices change: check `prices.json` against [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and update it (and `_price_date`) when they do; the report warns when the prices are more than 90 days old.
 
 claude-spend uses `~/.claude/claude-spend/prices.json` if that file exists, and otherwise the `prices.json` that comes with the package. To use your own prices, copy the bundled file to `~/.claude/claude-spend/prices.json` and edit that copy. It replaces the bundled list completely; the two are not merged.
@@ -121,6 +123,11 @@ Before 0.2.0 the data folder was `~/.claude/token-tracker`. Move it to the new n
 ```bash
 mv ~/.claude/token-tracker ~/.claude/claude-spend
 ```
+
+### Uninstalling
+1. Remove the program: `uv tool uninstall claude-spend` (or `pipx uninstall claude-spend`). With the manual install, delete `~/.local/bin/claude-spend` and `~/.claude/claude-spend/tracker.py`.
+2. Remove the two claude-spend entries (`Stop` and `SubagentStop`) from the `hooks` block in `~/.claude/settings.json`, leaving any other hooks you have.
+3. Your data stays in `~/.claude/claude-spend` (the log and your `prices.json`, if you made one). If you install it again later, it picks up the same log. Delete that folder only if you don't want to keep the history.
 
 ## Tests
 ```bash
