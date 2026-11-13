@@ -17,8 +17,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TRACKER = ROOT / "tracker.py"
-PRICES = ROOT / "prices.json"
+TRACKER = ROOT / "claude_spend" / "tracker.py"
+PRICES = ROOT / "claude_spend" / "prices.json"
 
 
 HOME_VARS = ("HOME", "USERPROFILE")  # Linux/macOS leen HOME; Windows, USERPROFILE
@@ -147,6 +147,19 @@ class CostTests(Base):
         # "claude-fable-5-3" no es una variante de "claude-fable-5": mejor sin precio que un precio ajeno
         self.assertIsNone(self.tr.price_for("claude-fable-5-3", p))
 
+    def test_the_bundled_prices_are_used_when_the_user_has_no_prices_json(self):
+        # instalación con pip/uv: nadie ha copiado prices.json a ~/.claude/token-tracker
+        (self.base / "prices.json").unlink()
+        self.assertEqual(self.tr.prices_path(), self.tr.BUNDLED_PRICES)
+        self.assertIn("claude-opus-5-5", self.tr.load_prices())
+        self.assertIn("List prices as of", self.tr.prices_note())
+
+    def test_the_users_prices_json_takes_precedence_over_the_bundled_one(self):
+        (self.base / "prices.json").write_text(
+            json.dumps({"_price_date": "2026-01-01", "my-model": {"input": 1.0, "output": 2.0}}), encoding="utf-8")
+        self.assertEqual(self.tr.prices_path(), self.tr.PRICES)
+        self.assertEqual(list(self.tr.load_prices()), ["my-model"])
+
     def test_unpriced_model_costs_zero_and_is_reported(self):
         total, unknown = self.tr.cost({"some-new-model": usage(1_000_000)}, self.tr.load_prices())
         self.assertEqual((total, unknown), (0.0, ["some-new-model"]))
@@ -258,7 +271,8 @@ class CliTests(Base):
         self.write_log([record("s1", "main", "main", {"claude-opus-5-5": usage(1)})])
         out = self.run_cli("--interactive", "--by", "agent")
         self.assertEqual(out.returncode, 0)
-        self.assertIn("needs a terminal", out.stderr)
+        # sin terminal se avisa de eso; en Windows (sin curses) se avisa antes de que no está disponible
+        self.assertRegex(out.stderr, "needs a terminal|not available here")
         self.assertIn("== Spend by agent", out.stdout)
 
     def test_since_and_project_filters(self):
@@ -304,7 +318,7 @@ class HookTests(Base):
         payload = json.dumps({"hook_event_name": "Stop", "session_id": "abcdef12-0000",
                               "transcript_path": str(t), "cwd": "/work/demo"})
         self.assertEqual(self.run_cli("hook", stdin=payload).returncode, 0)
-        lines = (self.base / "token-log.jsonl").read_text().splitlines()
+        lines = (self.base / "token-log.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(lines), 1)
         r = json.loads(lines[0])
         for key in ("event", "project", "agent", "agent_id", "start", "end", "models", "cost_usd", "title"):

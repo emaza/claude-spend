@@ -3,3 +3,8 @@ token-log.jsonl
 errors.log
 
 __pycache__/
+
+# Build output
+build/
+dist/
+*.egg-info/

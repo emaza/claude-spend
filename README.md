@@ -12,45 +12,69 @@ Everything runs on your machine: it reads the transcripts Claude Code already ke
 Python 3.9 or newer. No third-party packages. The interactive terminal view needs `curses`, which comes with Python on Linux and macOS but not on Windows.
 
 ## Platform support
-So far claude-spend has only been tested on **Linux**, with Python 3.11, 3.12 and 3.14. It only uses the standard library, so it should work on macOS and Windows too, but I haven't been able to try it there.
+So far I have only used claude-spend by hand on **Linux**, with Python 3.11, 3.12 and 3.14. It only uses the standard library, so it should work on macOS and Windows too, but I haven't been able to try it there. The test suite also runs in CI on Linux, macOS and Windows (Python 3.9, 3.11 and 3.13).
 
 If you run it on another system, I'd really appreciate your help testing it. Let me know how it goes, whether that's "it works" or a bug report, by opening an issue or a pull request. Improvements of any kind are welcome.
 
 ## Files
-- `tracker.py`: the log and the report (standard library only).
-- `prices.json`: list prices per model, in USD per million tokens, with the date they were taken. A model can have `tiers`: a different price for the requests whose prompt is longer than a number of tokens (for example Haiku 5.5 above 100,000). It is decided request by request and a model can have several tiers.
-- `claude-spend`: wrapper script that runs the report.
-- `hooks.settings.json`: the `Stop` and `SubagentStop` hooks to add to `~/.claude/settings.json`.
+- `claude_spend/tracker.py`: the log and the report (standard library only).
+- `claude_spend/prices.json`: list prices per model, in USD per million tokens, with the date they were taken. A model can have `tiers`: a different price for the requests whose prompt is longer than a number of tokens (for example Haiku 5.5 above 100,000). It is decided request by request and a model can have several tiers.
+- `pyproject.toml`: packaging, so it can be installed with `uv` or `pipx`.
+- `claude-spend`: wrapper script for the manual install below.
+- `hooks.settings.json`: the `Stop` and `SubagentStop` hooks for the manual install.
+- `tests/` and `.github/workflows/tests.yml`: the test suite and the CI that runs it.
 
 ## Installation
+There are two ways to install it. Either way, you then add the hooks to `~/.claude/settings.json` so that Claude Code records your spend as you work, and run `claude-spend --import` once to load the transcripts that are already on disk.
+
+### With uv or pipx (Linux, macOS and Windows)
+```bash
+uv tool install git+https://github.com/emaza/claude-spend
+# or: pipx install git+https://github.com/emaza/claude-spend
+```
+This puts the `claude-spend` command on your `PATH` and includes the price list. To update it later, run `uv tool upgrade claude-spend` (or `pipx upgrade claude-spend`).
+
+Then add this to `~/.claude/settings.json`. Merge it with what you already have; do not replace the file:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "claude-spend hook", "async": true, "timeout": 30 } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "claude-spend hook", "async": true, "timeout": 30 } ] }
+    ]
+  }
+}
+```
+
+If Claude Code can't find the command, use its full path in `"command"`. You can get it with `which claude-spend` (`Get-Command claude-spend` in PowerShell).
+
+### Manual install (Linux, and probably macOS)
 ```bash
 git clone https://github.com/emaza/claude-spend.git
 cd claude-spend
 mkdir -p ~/.claude/token-tracker ~/.local/bin
-cp tracker.py prices.json ~/.claude/token-tracker/
+cp claude_spend/tracker.py claude_spend/prices.json ~/.claude/token-tracker/
 cp claude-spend ~/.local/bin/ && chmod +x ~/.local/bin/claude-spend
 ```
-Then add the `hooks` block from `hooks.settings.json` to `~/.claude/settings.json`. Merge it with what you already have; do not replace the file. Always install `tracker.py` and `prices.json` together.
-
-These steps are for Linux, and should also work on macOS (untested).
+Then add the `hooks` block from `hooks.settings.json` to `~/.claude/settings.json`, merging it as above. Always copy `tracker.py` and `prices.json` together.
 
 ### Windows (untested)
-The steps below have not been tested on Windows. Please open an issue if something doesn't work.
+Neither method has been tested on Windows by hand, and I'd expect the `uv` or `pipx` route to be the easier one. Please open an issue if something doesn't work.
+
+If you prefer not to use `uv` or `pipx`, you can copy the files yourself. The `claude-spend` wrapper is a shell script, so on Windows run the tracker directly (use `py -3` instead of `python` if that's how you start Python):
 
 ```powershell
 git clone https://github.com/emaza/claude-spend.git
 cd claude-spend
 New-Item -ItemType Directory -Force "$HOME\.claude\token-tracker" | Out-Null
-Copy-Item tracker.py, prices.json "$HOME\.claude\token-tracker\"
-```
-
-The `claude-spend` wrapper is a shell script, so on Windows run the tracker directly (use `py -3` instead of `python` if that's how you start Python):
-
-```powershell
+Copy-Item claude_spend\tracker.py, claude_spend\prices.json "$HOME\.claude\token-tracker\"
 python "$HOME\.claude\token-tracker\tracker.py" --web
 ```
 
-For the hooks, copy the `hooks` block from `hooks.settings.json` as above, but change the command so it works on your system, with the full path to the script. For example: `python "C:/Users/you/.claude/token-tracker/tracker.py" hook`.
+For the hooks, copy the `hooks` block from `hooks.settings.json`, but change the command so it works on your system, with the full path to the script. For example: `python "C:/Users/you/.claude/token-tracker/tracker.py" hook`.
 
 The interactive terminal view (`--interactive`) needs `curses`. You can try `pip install windows-curses`. Without it, claude-spend prints the plain report instead, and `--web` works either way.
 
@@ -89,6 +113,8 @@ Mouse clicks depend on the terminal: most modern ones work, but some report doub
 The log is stored in `~/.claude/token-tracker/token-log.jsonl`. That file has your data and is not uploaded to the repository. It is append-only: each line is a snapshot of one agent in one session, and the report keeps the latest one. Keep this file if you want a long-term history, because Claude Code deletes old transcripts after a while and `--import` can only rebuild what is still on disk.
 
 The amounts are an estimate at list price. If you use a Pro or Max subscription, it is not what you pay. Prices change: check `prices.json` against [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and update it (and `_price_date`) when they do; the report warns when the prices are more than 90 days old.
+
+claude-spend uses `~/.claude/token-tracker/prices.json` if that file exists, and otherwise the `prices.json` that comes with the package. To use your own prices, copy the bundled file to `~/.claude/token-tracker/prices.json` and edit that copy. It replaces the bundled list completely; the two are not merged.
 
 ## Tests
 ```bash

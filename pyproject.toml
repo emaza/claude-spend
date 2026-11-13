@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-spend"
+version = "0.1.0"
+description = "Estimate Claude Code token spend by agent, project, model, day, session and task, in the terminal or a local web page"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["claude", "claude-code", "tokens", "usage", "cost"]
+classifiers = [
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
+# No third-party dependencies: standard library only.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/emaza/claude-spend"
+Issues = "https://github.com/emaza/claude-spend/issues"
+
+[project.scripts]
+claude-spend = "claude_spend.tracker:main"
+
+[tool.setuptools]
+packages = ["claude_spend"]
+
+[tool.setuptools.package-data]
+claude_spend = ["prices.json"]

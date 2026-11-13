@@ -29,7 +29,8 @@ from collections import defaultdict
 BASE = os.path.expanduser("~/.claude/token-tracker")
 LOG = os.path.join(BASE, "token-log.jsonl")
 ERRLOG = os.path.join(BASE, "errors.log")
-PRICES = os.path.join(BASE, "prices.json")
+PRICES = os.path.join(BASE, "prices.json")  # el del usuario: si existe, manda
+BUNDLED_PRICES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prices.json")  # el que viene con el paquete
 PROJECTS = os.path.expanduser("~/.claude/projects")
 FIELDS = ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")
 MAIN = "main"
@@ -104,9 +105,14 @@ def parse_transcript(path, skip_sidechain=False, prices=None):
     return models, cwd, first, last, title
 
 
+def prices_path():
+    """prices.json del usuario si existe; si no, el que viene con el paquete (instalación con pip/uv)."""
+    return PRICES if os.path.exists(PRICES) else BUNDLED_PRICES
+
+
 def load_prices():
     try:
-        with open(PRICES, encoding="utf-8") as f:
+        with open(prices_path(), encoding="utf-8") as f:
             return {k: v for k, v in json.load(f).items() if not k.startswith("_")}
     except (OSError, ValueError):
         return {}
@@ -136,7 +142,7 @@ def tier_for(p, prompt):
 
 def prices_note():
     """Línea para el informe con la fecha de los precios y aviso si son antiguos."""
-    meta = read_json(PRICES)
+    meta = read_json(prices_path())
     date = meta.get("_price_date")
     if not date:
         return "Prices: no date in prices.json (add \"_price_date\")."
@@ -493,7 +499,7 @@ def report_notes(records, prices):
     if unpriced:
         notes.append("⚠ Models without a price (counted as 0 USD): " + ", ".join(unpriced)
                      + ". Add them to prices.json.")
-    notes.append("USD = estimate at list price (~/.claude/token-tracker/prices.json); "
+    notes.append("USD = estimate at list price (prices.json); "
                  "with a Pro/Max subscription it is not what you pay.")
     notes.append(prices_note())
     return notes
