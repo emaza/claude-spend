@@ -6,6 +6,8 @@ Visualize Claude Code token usage in simple tables, either through an interactiv
 
 Everything runs on your machine: it reads the transcripts Claude Code already keeps in `~/.claude/projects` and writes only to `~/.claude/token-tracker/`. Nothing is sent anywhere.
 
+![The claude-spend web page: a sortable table of estimated spend by agent, with tabs for project, model, day, session and task](docs/screenshot.png)
+
 ## Requirements
 Python 3.9 or newer (tested on 3.11, 3.12 and 3.14). No third-party packages. The interactive terminal view needs `curses`, which ships with Python on Linux and macOS.
 
