@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "claude-spend"
 version = "0.1.0"
-description = "Estimate Claude Code token spend by agent, project, model, day, session and task, in the terminal or a local web page"
+description = "Visualize Claude Code token usage in simple tables, in an interactive terminal view or a local web page, broken down by agent, project, model, day, session and task"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
