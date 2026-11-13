@@ -47,3 +47,5 @@ jobs:
           "$RUNNER_TEMP/venv/bin/claude-spend" --help
           # with no prices.json of the user's, the bundled one must be found
           "$RUNNER_TEMP/venv/bin/python" -c "import claude_spend.tracker as t; assert t.load_prices(), 'bundled prices.json missing'"
+          # the web page files must be inside the package
+          "$RUNNER_TEMP/venv/bin/python" -c "import os, claude_spend.tracker as t; assert all(os.path.isfile(os.path.join(t.WEB, n)) for n, _ in t.WEB_FILES.values()), 'web files missing'"

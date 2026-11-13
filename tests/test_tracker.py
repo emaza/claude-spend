@@ -368,7 +368,14 @@ class WebTests(Base):
         status, html = self.get("/")
         self.assertEqual(status, 200)
         self.assertIn("Claude Spend", html)
-        self.assertNotIn("innerHTML", html)  # los títulos vienen de los transcripts: solo textContent
+        self.assertIn(f"v{self.tr.__version__}", html)
+        self.assertNotIn("__", html)  # todos los marcadores sustituidos
+        status, js = self.get("/main.js")
+        self.assertEqual(status, 200)
+        self.assertNotIn("innerHTML", js)  # los títulos vienen de los transcripts: solo textContent
+        self.assertEqual(self.get("/styles.css")[0], 200)
+        for path in ("/tracker.py", "/../tracker.py", "/web/main.js", "/index.html"):
+            self.assertEqual(self.get(path)[0], 404, path)
         status, body = self.get("/api/report")
         data = json.loads(body)
         self.assertEqual(status, 200)
@@ -380,6 +387,34 @@ class WebTests(Base):
         self.assertTrue(json.loads(body)["empty"])
         self.assertEqual(self.get("/api/report?since=abc")[0], 400)
         self.assertEqual(self.get("/nope")[0], 404)
+
+    def test_row_filters_keep_only_the_clicked_row(self):
+        self.write_log([
+            record("s1", "main", "cto", {"claude-opus-5-5": usage(1_000_000), "claude-haiku-5-5": usage(1_000_000)}),
+            record("s1", "a1", "tester", {"claude-opus-5-5": usage(2_000_000)}, task="check"),
+            record("s2", "main", "main", {"claude-haiku-5-5": usage(4_000_000)}),
+        ])
+        before = self.tr.latest_records()
+        by_agent = self.tr.filtered_records(filters={"agent": "cto"})
+        self.assertEqual([(r["session_id"], r["agent"]) for r in by_agent], [("s1", "cto")])
+        # un modelo: solo cuenta su parte de cada registro, y el registro original no se toca
+        by_model = self.tr.filtered_records(filters={"model": "claude-opus-5-5"})
+        self.assertEqual(sorted(r["agent"] for r in by_model), ["cto", "tester"])
+        self.assertTrue(all(list(r["models"]) == ["claude-opus-5-5"] for r in by_model))
+        self.assertEqual(self.tr.latest_records(), before)
+        both = self.tr.filtered_records(filters={"session": "s1", "model": "claude-haiku-5-5"})
+        self.assertEqual([r["agent"] for r in both], ["cto"])
+        self.assertEqual(self.tr.filtered_records(filters={"session": "s1", "agent": "main"}), [])
+
+    def test_report_api_filters_by_row(self):
+        data = json.loads(self.get("/api/report?f_agent=tester&f_nonsense=1")[1])
+        agents = next(t for t in data["tables"] if t["by"] == "agent")
+        self.assertEqual([row[0]["sort"] for row in agents["rows"]], ["tester"])
+        usd = [c["id"] for c in agents["cols"]].index("usd")
+        everything = next(t for t in json.loads(self.get("/api/report")[1])["tables"] if t["by"] == "agent")
+        self.assertLess(agents["total"][usd]["sort"], everything["total"][usd]["sort"])
+        data = json.loads(self.get("/api/report?f_agent=nobody")[1])
+        self.assertEqual((data["empty"], data["message"]), (True, self.tr.NO_MATCH))
 
     def test_foreign_host_header_is_rejected(self):
         self.assertEqual(self.get("/api/report", host="evil.example:80")[0], 403)

@@ -15,6 +15,7 @@ The log lives in ~/.claude/claude-spend/token-log.jsonl. Each line is a cumulati
 import argparse
 import datetime as dt
 import glob
+import html
 import http.server
 import json
 import os
@@ -26,12 +27,18 @@ import urllib.parse
 import webbrowser
 from collections import defaultdict
 
-__version__ = "0.2.2"
+__version__ = "0.3.1"
 
 BASE = os.path.expanduser("~/.claude/claude-spend")
 LOG = os.path.join(BASE, "token-log.jsonl")
 ERRLOG = os.path.join(BASE, "errors.log")
 PRICES = os.path.join(BASE, "prices.json")  # el del usuario: si existe, manda
+WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")  # index.html, styles.css y main.js
+# lo único que sirve --web del disco: ruta pedida -> (archivo, Content-Type)
+WEB_FILES = {"/": ("index.html", "text/html; charset=utf-8"),
+             "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+             "/main.js": ("main.js", "text/javascript; charset=utf-8")}
+CSP = "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'"
 BUNDLED_PRICES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prices.json")  # el que viene con el paquete
 PROJECTS = os.path.expanduser("~/.claude/projects")
 FIELDS = ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")
@@ -42,6 +49,7 @@ TITLE_FIELDS = {"custom-title": "customTitle", "ai-title": "aiTitle", "last-prom
 TITLE_WIDTH = 30
 DEFAULT_PORT = 8765
 NO_RECORDS = "No records. Run `claude-spend --import` to load the existing transcripts."
+NO_MATCH = "No records match these filters."
 
 
 # ---------------------------------------------------------------- transcripts
@@ -306,7 +314,14 @@ def latest_records():
     return [r for _, r in latest.values()]
 
 
-def filtered_records(since=None, project=None):
+def filtered_records(since=None, project=None, filters=None):
+    """Registros del informe. `filters` es {dimensión de GROUPS: valor}: solo quedan los que caen en esa fila.
+
+    Se compara con group_key, así que el filtro coincide con lo que muestra la tabla. Con "model",
+    el registro se sustituye por una copia que solo lleva ese modelo, para no contar los demás.
+    """
+    filters = dict(filters or {})
+    model = filters.pop("model", None)
     records = []
     for r in latest_records():
         day = (r.get("end") or r.get("ts") or "")[:10]
@@ -314,6 +329,12 @@ def filtered_records(since=None, project=None):
             continue
         if project and project not in (r.get("project") or ""):
             continue
+        if any(group_key(r, by) != value for by, value in filters.items()):
+            continue
+        if model is not None:
+            if model not in r.get("models", {}):
+                continue
+            r = {**r, "models": {model: r["models"][model]}}
         records.append(r)
     return records
 
@@ -732,11 +753,12 @@ def cmd_interactive(args):
 
 
 # ----------------------------------------------------------------------- web
-def report_data(since=None, project=None):
+def report_data(since=None, project=None, filters=None):
     prices = load_prices()
-    records = filtered_records(since, project)
+    records = filtered_records(since, project, filters)
     if not records:
-        return {"empty": True, "message": NO_RECORDS, "tables": [], "notes": []}
+        message = NO_MATCH if (since or project or filters) and latest_records() else NO_RECORDS
+        return {"empty": True, "message": message, "tables": [], "notes": []}
     return {"empty": False, "message": "", "notes": report_notes(records, prices),
             "tables": [build_table(by, records, prices) for by in GROUPS]}
 
@@ -765,17 +787,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(403, "Forbidden", "text/plain; charset=utf-8")
         url = urllib.parse.urlparse(self.path)
         try:
-            if url.path == "/":
-                return self._send(200, PAGE.replace("__VERSION__", __version__), "text/html; charset=utf-8", {
-                    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
-                                               "script-src 'unsafe-inline'; connect-src 'self'"})
+            if url.path in WEB_FILES:
+                name, ctype = WEB_FILES[url.path]
+                with open(os.path.join(WEB, name), encoding="utf-8") as f:
+                    body = f.read()
+                if name == "index.html":
+                    body = (body.replace("__VERSION__", html.escape(__version__))
+                            .replace("__GROUPS__", html.escape(json.dumps(GROUPS))))
+                return self._send(200, body, ctype, {"Content-Security-Policy": CSP})
             if url.path == "/api/report":
                 q = urllib.parse.parse_qs(url.query)
                 since = (q.get("since") or [""])[0]
                 if since and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
                     return self._send(400, json.dumps({"error": "since must be YYYY-MM-DD"}),
                                       "application/json; charset=utf-8")
-                data = report_data(since or None, (q.get("project") or [""])[0] or None)
+                filters = {by: q[f"f_{by}"][0] for by in GROUPS if q.get(f"f_{by}")}  # clic en una fila
+                data = report_data(since or None, (q.get("project") or [""])[0] or None, filters)
                 return self._send(200, json.dumps(data, ensure_ascii=False), "application/json; charset=utf-8")
             return self._send(404, "Not found", "text/plain; charset=utf-8")
         except Exception:
@@ -784,6 +811,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def cmd_web(args):
+    missing = [n for n, _ in WEB_FILES.values() if not os.path.isfile(os.path.join(WEB, n))]
+    if missing:
+        print(f"The web page files are missing from {WEB} ({', '.join(missing)}). "
+              "Copy the claude_spend/web folder next to tracker.py.", file=sys.stderr)
+        return 1
     try:
         server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError as e:
@@ -804,155 +836,6 @@ def cmd_web(args):
     return 0
 
 
-PAGE = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Claude Spend</title>
-<style>
-  :root { color-scheme: light dark; --bg:#fafaf9; --fg:#1c1917; --muted:#6b645f; --line:#e2dfdc;
-          --head:#f1efed; --accent:#b45309; --hover:#f5f3f1; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#171413; --fg:#f2efed; --muted:#a39d98; --line:#3a3532; --head:#24201e;
-            --accent:#fb923c; --hover:#1f1b1a; }
-  }
-  * { box-sizing: border-box; }
-  body { margin:0; padding:24px 16px 48px; background:var(--bg); color:var(--fg);
-         font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { width:max-content; min-width:min(1100px, 100%); max-width:100%; margin:0 auto; }
-  h1 { font-size:20px; margin:0 0 4px; }
-  .ver { font-size:13px; font-weight:400; color:var(--muted); }
-  .sub { color:var(--muted); margin:0 0 20px; }
-  .bar { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:end; margin-bottom:16px; }
-  label { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); }
-  input { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line);
-          border-radius:6px; padding:6px 8px; min-width:0; }
-  button { font:inherit; color:var(--fg); background:var(--head); border:1px solid var(--line);
-           border-radius:6px; padding:6px 12px; cursor:pointer; }
-  button:hover { border-color:var(--accent); }
-  button:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-  .tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
-  .tabs button[aria-selected="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
-  .wrap { overflow-x:auto; border:1px solid var(--line); border-radius:8px; }
-  table { border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums; }
-  th, td { padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
-  th { background:var(--head); position:sticky; top:0; padding:0; }
-  th button { all:unset; box-sizing:border-box; display:block; width:100%; padding:8px 12px; cursor:pointer;
-              font-weight:600; }
-  th button:hover { color:var(--accent); }
-  th button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
-  .r { text-align:right; } th.r button { text-align:right; }
-  tbody tr:hover { background:var(--hover); }
-  tfoot td { font-weight:700; border-bottom:0; background:var(--head); }
-  .state { padding:24px; color:var(--muted); }
-  .notes { margin:16px 0 0; padding:0; list-style:none; color:var(--muted); font-size:13px; }
-  .notes li { margin-bottom:4px; }
-  .err { color:#b91c1c; }
-</style>
-</head>
-<body>
-<main>
-  <h1>Claude Spend <span class="ver">v__VERSION__</span></h1>
-  <p class="sub">Estimated Claude Code token spend at list price. Click a column header to sort.</p>
-  <form class="bar" id="filters">
-    <label>Since <input type="date" id="since"></label>
-    <label>Project contains <input type="text" id="project" placeholder="any"></label>
-    <button type="submit">Refresh</button>
-  </form>
-  <div class="tabs" role="tablist" id="tabs"></div>
-  <div class="wrap"><div id="out" class="state">Loading…</div></div>
-  <ul class="notes" id="notes"></ul>
-</main>
-<script>
-  let data = null, tab = 0;
-  const sorts = {};   // per table: [column index, desc]
-  const $ = (id) => document.getElementById(id);
-
-  const defaultDesc = (col) => col.type !== "text";
-  const key = (v) => (typeof v === "string" ? v.toLowerCase() : v);
-
-  function sortedRows(t, idx, desc) {
-    const have = t.rows.filter((r) => r[idx].sort !== null);
-    const missing = t.rows.filter((r) => r[idx].sort === null);
-    have.sort((a, b) => {
-      const x = key(a[idx].sort), y = key(b[idx].sort);
-      const c = x < y ? -1 : x > y ? 1 : 0;
-      return desc ? -c : c;
-    });
-    return have.concat(missing);
-  }
-
-  function el(tag, text, cls) {
-    const e = document.createElement(tag);
-    if (text !== undefined) e.textContent = text;
-    if (cls) e.className = cls;
-    return e;
-  }
-
-  function render() {
-    const tabs = $("tabs"), out = $("out"), notes = $("notes");
-    tabs.replaceChildren(); notes.replaceChildren();
-    if (data.empty) { out.className = "state"; out.textContent = data.message; return; }
-    data.tables.forEach((t, i) => {
-      const b = el("button", t.cols[0].name);
-      b.type = "button"; b.setAttribute("role", "tab");
-      b.setAttribute("aria-selected", String(i === tab));
-      b.onclick = () => { tab = i; render(); };
-      tabs.append(b);
-    });
-    const t = data.tables[tab];
-    const [si, sd] = sorts[tab] || t.default_sort;
-    const table = el("table"), thead = el("thead"), hr = el("tr");
-    t.cols.forEach((c, i) => {
-      const th = el("th", undefined, c.align === "right" ? "r" : "");
-      th.scope = "col";
-      th.setAttribute("aria-sort", i === si ? (sd ? "descending" : "ascending") : "none");
-      const b = el("button", c.name + (i === si ? (sd ? " ▼" : " ▲") : ""));
-      b.type = "button";
-      b.onclick = () => {
-        sorts[tab] = i === si ? [i, !sd] : [i, defaultDesc(c)];
-        render();
-      };
-      th.append(b); hr.append(th);
-    });
-    thead.append(hr);
-    const tbody = el("tbody");
-    sortedRows(t, si, sd).forEach((row) => {
-      const tr = el("tr");
-      row.forEach((c, i) => tr.append(el("td", c.text, t.cols[i].align === "right" ? "r" : "")));
-      tbody.append(tr);
-    });
-    const tfoot = el("tfoot"), fr = el("tr");
-    t.total.forEach((c, i) => fr.append(el("td", c.text, t.cols[i].align === "right" ? "r" : "")));
-    tfoot.append(fr);
-    table.append(thead, tbody, tfoot);
-    out.className = ""; out.replaceChildren(table);
-    data.notes.forEach((n) => notes.append(el("li", n)));
-  }
-
-  async function load() {
-    const q = new URLSearchParams();
-    if ($("since").value) q.set("since", $("since").value);
-    if ($("project").value.trim()) q.set("project", $("project").value.trim());
-    try {
-      const r = await fetch("/api/report?" + q);
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      data = await r.json();
-      if (tab >= data.tables.length) tab = 0;
-      render();
-    } catch (e) {
-      $("out").className = "state err";
-      $("out").textContent = "Could not load the report: " + e.message;
-    }
-  }
-
-  $("filters").addEventListener("submit", (e) => { e.preventDefault(); load(); });
-  load();
-</script>
-</body>
-</html>
-"""
 
 
 def main():

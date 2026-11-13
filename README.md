@@ -19,6 +19,7 @@ What the tests don't cover is real-world use on macOS and Windows: the Claude Co
 ## Files
 - `claude_spend/tracker.py`: the log and the report (standard library only).
 - `claude_spend/prices.json`: list prices per model, in USD per million tokens, with the date they were taken. A model can have `tiers`: a different price for the requests whose prompt is longer than a number of tokens (for example Haiku 5.5 above 100,000). It is decided request by request and a model can have several tiers.
+- `claude_spend/web/`: the page that `--web` serves (`index.html`, `styles.css` and `main.js`).
 - `pyproject.toml`: packaging, so it can be installed with `uv` or `pipx`.
 - `claude-spend`: wrapper script for the manual install below.
 - `hooks.settings.json`: the `Stop` and `SubagentStop` hooks for the manual install.
@@ -56,10 +57,10 @@ If Claude Code can't find the command, use its full path in `"command"`. You can
 git clone https://github.com/emaza/claude-spend.git
 cd claude-spend
 mkdir -p ~/.claude/claude-spend ~/.local/bin
-cp claude_spend/tracker.py claude_spend/prices.json ~/.claude/claude-spend/
+cp -r claude_spend/tracker.py claude_spend/prices.json claude_spend/web ~/.claude/claude-spend/
 cp claude-spend ~/.local/bin/ && chmod +x ~/.local/bin/claude-spend
 ```
-Then add the `hooks` block from `hooks.settings.json` to `~/.claude/settings.json`, merging it as above. Always copy `tracker.py` and `prices.json` together.
+Then add the `hooks` block from `hooks.settings.json` to `~/.claude/settings.json`, merging it as above. Always copy `tracker.py`, `prices.json` and the `web` folder together.
 
 ### Windows
 The tests pass on Windows, but I haven't tried the install steps, the hooks or the terminal view there by hand, and I'd expect the `uv` or `pipx` route to be the easier one. Please open an issue if something doesn't work.
@@ -70,7 +71,7 @@ If you prefer not to use `uv` or `pipx`, you can copy the files yourself. The `c
 git clone https://github.com/emaza/claude-spend.git
 cd claude-spend
 New-Item -ItemType Directory -Force "$HOME\.claude\claude-spend" | Out-Null
-Copy-Item claude_spend\tracker.py, claude_spend\prices.json "$HOME\.claude\claude-spend\"
+Copy-Item -Recurse claude_spend\tracker.py, claude_spend\prices.json, claude_spend\web "$HOME\.claude\claude-spend\"
 python "$HOME\.claude\claude-spend\tracker.py" --web
 ```
 
@@ -107,7 +108,7 @@ Click a column header to sort by it; click it again to reverse the order. A doub
 Mouse clicks depend on the terminal: most modern ones work, but some report double clicks differently, which is why a single click is enough.
 
 ### Web page
-`claude-spend --web` serves the report on `http://127.0.0.1:8765` and opens it in your default browser. It only listens on your own machine and only reads the log; reloading the page (or pressing Refresh) recalculates it from the current data. The tables can be filtered by date and project. Press `Ctrl+C` to stop it.
+`claude-spend --web` serves the report on `http://127.0.0.1:8765` and opens it in your default browser. It only listens on your own machine and only reads the log; reloading the page (or pressing Refresh) recalculates it from the current data. The tables can be filtered by date and project. Click a row to filter every table by it: after clicking a project, for example, the other tabs show only that project's sessions, models, days and tasks. The page stays on the same tab. The filters add up; each one appears as a label above the tables, and clicking the label removes it. The page address keeps the filters, the tab and the sort order, so reloading keeps the view and the browser's Back button undoes the last filter. Press `Ctrl+C` to stop it.
 
 ## Data
 The log is stored in `~/.claude/claude-spend/token-log.jsonl`. That file has your data and is not uploaded to the repository. It is append-only: each line is a snapshot of one agent in one session, and the report keeps the latest one. Keep this file if you want a long-term history, because Claude Code deletes old transcripts after a while and `--import` can only rebuild what is still on disk.
@@ -125,7 +126,7 @@ mv ~/.claude/token-tracker ~/.claude/claude-spend
 ```
 
 ### Uninstalling
-1. Remove the program: `uv tool uninstall claude-spend` (or `pipx uninstall claude-spend`). With the manual install, delete `~/.local/bin/claude-spend` and `~/.claude/claude-spend/tracker.py`.
+1. Remove the program: `uv tool uninstall claude-spend` (or `pipx uninstall claude-spend`). With the manual install, delete `~/.local/bin/claude-spend`, `~/.claude/claude-spend/tracker.py` and `~/.claude/claude-spend/web`.
 2. Remove the two claude-spend entries (`Stop` and `SubagentStop`) from the `hooks` block in `~/.claude/settings.json`, leaving any other hooks you have.
 3. Your data stays in `~/.claude/claude-spend` (the log and your `prices.json`, if you made one). If you install it again later, it picks up the same log. Delete that folder only if you don't want to keep the history.
 

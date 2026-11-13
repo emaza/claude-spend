@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Spend</title>
+<link rel="stylesheet" href="/styles.css">
+<script src="/main.js" defer></script>
+</head>
+<body>
+<main data-groups="__GROUPS__">
+  <h1>Claude Spend <span class="ver">v__VERSION__</span></h1>
+  <p class="sub">Estimated Claude Code token spend at list price. Click a column header to sort, or a row to filter every table by it.</p>
+  <form class="bar" id="filters">
+    <label>Since <input type="date" id="since"></label>
+    <label>Project contains <input type="text" id="project" placeholder="any"></label>
+    <button type="submit">Refresh</button>
+  </form>
+  <div class="chips" id="chips" aria-label="Active filters" hidden></div>
+  <div class="tabs" role="tablist" id="tabs"></div>
+  <div class="wrap"><div id="out" class="state">Loading…</div></div>
+  <ul class="notes" id="notes"></ul>
+</main>
+</body>
+</html>
