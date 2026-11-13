@@ -119,6 +119,12 @@ The amounts are an estimate at list price. If you use a Pro or Max subscription,
 
 claude-spend uses `~/.claude/claude-spend/prices.json` if that file exists, and otherwise the `prices.json` that comes with the package. To use your own prices, copy the bundled file to `~/.claude/claude-spend/prices.json` and edit that copy. It replaces the bundled list completely; the two are not merged.
 
+### Updating
+- With uv or pipx: `uv tool upgrade claude-spend` (or `pipx upgrade claude-spend`).
+- With the manual install: run `git pull` in your clone and copy the files again, as in the install steps (`tracker.py`, `prices.json` and the `web` folder). If you have your own `prices.json`, leave out `prices.json` so your copy is kept.
+
+Check the version with `claude-spend --version`. Your data stays where it is.
+
 ### Upgrading from 0.1.x
 Before 0.2.0 the data folder was `~/.claude/token-tracker`. Move it to the new name and update the paths in your hooks (and in `~/.local/bin/claude-spend` if you used the manual install):
 ```bash
