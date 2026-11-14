@@ -107,7 +107,7 @@
         const d = new Date(w.resets_at * 1000);
         const hm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
         resets = d.toDateString() === now.toDateString() ? `Resets at ${hm}`
-          : `Resets ${d.toLocaleDateString([], { weekday: "long" })}, ${hm}`;
+          : `Resets ${d.toLocaleDateString("en", { weekday: "long" })}, ${hm}`;
       }
       const head = el("div", undefined, "lh");   // "Current session: 89% used | Resets at 1:30"
       head.append(el("span", w.label + ":", "lt"), el("span", Math.round(w.pct) + "% used", "pct"),
