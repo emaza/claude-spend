@@ -56,3 +56,7 @@ tfoot td { font-weight:700; border-bottom:0; background:var(--head); }
 .limit .pct { font-variant-numeric:tabular-nums; }
 .limit .rs { color:var(--muted); font-size:13px; }
 .limits .upd { flex-basis:100%; margin:0; color:var(--muted); font-size:13px; }
+h1 { display:flex; align-items:center; gap:8px; }
+.gh { margin-left:auto; color:var(--muted); display:inline-flex; }
+.gh:hover, .gh:focus-visible { color:var(--accent); }
+.gh:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }

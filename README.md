@@ -156,6 +156,26 @@ The amounts are an estimate at list price. If you use a Pro or Max subscription,
 
 claude-spend uses `~/.claude/claude-spend/prices.json` if that file exists, and otherwise the `prices.json` that comes with the package. To use your own prices, copy the bundled file to `~/.claude/claude-spend/prices.json` and edit that copy. It replaces the bundled list completely; the two are not merged.
 
+### Price changes
+The USD columns are always recalculated from the tokens, so if you overwrite a price, the whole history changes with it. To keep past usage at its old price, turn the model's entry into a list of periods: leave the old price without `"from"` and add the new one with the day it starts.
+
+```json
+"claude-opus-5-5": [
+  {"input": 5.0, "output": 25.0, "cache_read": 0.25, "cache_write_5m": 6.25, "cache_write_1h": 10.0},
+  {"from": "2026-12-01", "input": 4.0, "output": 20.0, "cache_read": 0.20, "cache_write_5m": 5.0, "cache_write_1h": 8.0}
+]
+```
+
+- `"from"` is a day (`YYYY-MM-DD`) in **UTC** and is inclusive: usage on 2026-12-01 UTC uses the second price. Each period lasts until the next one's `"from"`, and the last one has no end.
+- Only the first period may leave out `"from"`. Usage before the first `"from"` is charged with the oldest period.
+- A plain object, like the entries in the bundled file, is a single period that always applies, so existing `prices.json` files keep working as they are.
+- `tiers` go inside each period and can be different in each one.
+- If a model's entry is invalid (a bad date, two periods with the same `"from"`, an empty list), that model is ignored, counted as having no price, and the report says why.
+
+Records are split by UTC day, and each day is charged with the period in effect that day. Records made before 0.5.0 have no split by day: each one is charged as a whole with the price of the day it ended. Run `claude-spend --import` to record them again with the split, for the transcripts that are still on disk.
+
+More details, including how to add a price change step by step and the limits of this approach, in [Price changes](docs/precios-con-vigencia.md).
+
 ### Updating
 - With uv or pipx: `uv tool upgrade claude-spend` (or `pipx upgrade claude-spend`).
 - With the manual install: run `git pull` in your clone and copy the files again, as in the install steps (`tracker.py`, `prices.json` and the `web` folder). If you have your own `prices.json`, leave out `prices.json` so your copy is kept.
