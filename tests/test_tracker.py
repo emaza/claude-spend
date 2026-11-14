@@ -123,7 +123,8 @@ class CostTests(Base):
         models, cwd, first, last, title = self.tr.parse_transcript(t, prices=self.tr.load_prices())
         h = models["claude-haiku-5-5"]
         self.assertEqual(h["requests"], 2)
-        self.assertEqual(h["tiers"]["100000"]["input"], 150000)  # solo la petición larga está en el tramo
+        self.assertNotIn("tiers", h)  # los tramos van dentro de cada día
+        self.assertEqual(h["days"]["2026-11-13"]["tiers"]["100000"]["input"], 150000)  # solo la petición larga
         total, unknown = self.tr.cost(models, self.tr.load_prices())
         self.assertEqual(unknown, [])
         # 150000 in x0.50 + 1000 out x2.50 (tramo)  +  1000 in x0.10 + 1000 out x0.50 (base), por millón
@@ -142,8 +143,8 @@ class CostTests(Base):
 
     def test_price_for_matches_variants_but_not_other_versions(self):
         p = self.tr.load_prices()
-        self.assertIs(self.tr.price_for("claude-opus-5-5-20261101", p), p["claude-opus-5-5"])
-        self.assertIs(self.tr.price_for("claude-sonnet-5-5[1m]", p), p["claude-sonnet-5-5"])
+        self.assertIs(self.tr.price_for("claude-opus-5-5-20261101", p), p["claude-opus-5-5"][0])
+        self.assertIs(self.tr.price_for("claude-sonnet-5-5[1m]", p), p["claude-sonnet-5-5"][0])
         # "claude-fable-5-3" no es una variante de "claude-fable-5": mejor sin precio que un precio ajeno
         self.assertIsNone(self.tr.price_for("claude-fable-5-3", p))
 
@@ -422,6 +423,174 @@ class WebTests(Base):
 
     def test_only_get_is_served(self):
         self.assertEqual(self.get("/api/report", method="POST")[0], 501)
+
+
+def price(inp, **extra):
+    return {"input": inp, "output": 0.0, "cache_read": 0.0, "cache_write_5m": 0.0, "cache_write_1h": 0.0, **extra}
+
+
+def request(i, ts, model="m", inp=0, out=0):
+    e = {"type": "assistant", "uuid": f"u{i}", "cwd": "/work/demo",
+         "message": {"id": f"m{i}", "model": model, "usage": {"input_tokens": inp, "output_tokens": out}}}
+    if ts:
+        e["timestamp"] = ts
+    return e
+
+
+NOV, DEC = "2026-11-30T23:30:00.000Z", "2026-12-01T00:30:00.000Z"  # a ambos lados del cambio de precio
+
+
+class PricePeriodTests(Base):
+    """Precios con vigencia: el modelo "m" cuesta 1.0 hasta el 2026-11-30 y 2.0 desde el 2026-12-01."""
+
+    def write_prices(self, prices):
+        (self.base / "prices.json").write_text(json.dumps({"_price_date": "2026-11-11", **prices}), encoding="utf-8")
+        return self.tr.load_prices()
+
+    def two_periods(self, **second):
+        return self.write_prices({"m": [price(1.0), {"from": "2026-12-01", **price(2.0), **second}]})
+
+    def test_normalize_prices(self):
+        norm = self.tr.normalize_prices
+        prices, problems = norm({"_x": "ignored", "flat": price(1.0),
+                                 "unsorted": [{"from": "2026-12-01", **price(2.0)}, price(1.0)]})
+        self.assertEqual(problems, [])
+        self.assertEqual(list(prices), ["flat", "unsorted"])
+        self.assertEqual(prices["flat"], [{"from": None, **price(1.0)}])
+        self.assertEqual([p["from"] for p in prices["unsorted"]], [None, "2026-12-01"])
+        bad = {"dup": [{"from": "2026-12-01", **price(1.0)}, {"from": "2026-12-01", **price(2.0)}],
+               "month13": [{"from": "2026-13-01", **price(1.0)}],
+               "two_open": [price(1.0), price(2.0)],
+               "empty": [],
+               "weird": None, "number": 3, "text": "abc", "item": [price(1.0), 5],
+               "from_number": [{"from": 20261201, **price(1.0)}]}
+        prices, problems = norm(bad)
+        self.assertEqual(prices, {})
+        for model in bad:
+            self.assertTrue(any(f" {model} ignored" in p for p in problems), model)
+        self.assertTrue(any("invalid from '2026-13-01'" in p for p in problems))
+        for raw in (None, [], "x", 3):
+            self.assertEqual(norm(raw)[0], {})  # nunca lanza
+
+    def test_period_for(self):
+        periods = self.two_periods()["m"]
+        self.assertEqual(self.tr.period_for(periods, "2026-11-30")["input"], 1.0)
+        self.assertEqual(self.tr.period_for(periods, "2026-12-01")["input"], 2.0)  # inclusivo
+        self.assertEqual(self.tr.period_for(periods, "2030-01-01")["input"], 2.0)
+        self.assertEqual(self.tr.period_for(periods, "1990-01-01")["input"], 1.0)  # sin "from": desde siempre
+        later = self.tr.normalize_prices({"m": [{"from": "2026-06-01", **price(1.0)},
+                                                {"from": "2026-12-01", **price(2.0)}]})[0]["m"]
+        # antes del primer "from" se aplica el periodo más antiguo (decisión del CTO)
+        self.assertEqual(self.tr.period_for(later, "2026-05-31")["input"], 1.0)
+        self.assertIsNone(self.tr.period_for([], "2026-05-31"))
+
+    def test_price_for_a_variant_on_a_date(self):
+        prices = self.two_periods()
+        self.assertEqual(self.tr.price_for("m-20261101", prices, "2026-12-05")["input"], 2.0)
+        self.assertEqual(self.tr.price_for("m-20261101", prices, "2026-11-05")["input"], 1.0)
+
+    def test_utc_day(self):
+        self.assertEqual(self.tr.utc_day("2026-11-30T23:30:00.000Z"), "2026-11-30")
+        self.assertEqual(self.tr.utc_day("2026-11-30T20:00:00-05:00"), "2026-12-01")
+        self.assertEqual(self.tr.utc_day("2026-11-30T23:30:00"), "2026-11-30")  # sin zona = UTC
+        for bad in ("basura", None, "", 3):
+            self.assertIsNone(self.tr.utc_day(bad))
+
+    def test_parse_transcript_splits_by_utc_day(self):
+        t = self.write_transcript([request(1, NOV, inp=100, out=1), request(2, DEC, inp=30, out=2)])
+        m = self.tr.parse_transcript(t, prices=self.two_periods())[0]["m"]
+        self.assertEqual(sorted(m["days"]), ["2026-11-30", "2026-12-01"])
+        self.assertEqual(m["days"]["2026-11-30"]["input"], 100)
+        self.assertEqual(m["days"]["2026-12-01"]["input"], 30)
+        for k in self.tr.FIELDS + ("requests",):
+            self.assertEqual(sum(d[k] for d in m["days"].values()), m[k], k)
+
+    def test_a_request_without_timestamp_goes_to_the_last_day_seen(self):
+        t = self.write_transcript([request(1, NOV, inp=1), request(2, DEC, inp=2), request(3, None, inp=4)])
+        days = self.tr.parse_transcript(t, prices=self.two_periods())[0]["m"]["days"]
+        self.assertEqual(days["2026-12-01"]["input"], 6)
+
+    def test_the_tier_is_decided_with_the_period_of_the_day(self):
+        prices = self.two_periods(tiers=[{"prompt_over": 100000, **price(3.0)}])
+        t = self.write_transcript([request(1, NOV, inp=150000), request(2, DEC, inp=150000)])
+        m = self.tr.parse_transcript(t, prices=prices)[0]["m"]
+        self.assertNotIn("tiers", m["days"]["2026-11-30"])
+        self.assertEqual(m["days"]["2026-12-01"]["tiers"]["100000"]["input"], 150000)
+        self.assertAlmostEqual(self.tr.cost({"m": m}, prices)[0], 0.15 + 0.45, places=6)
+
+    def test_cost_charges_each_day_with_its_period(self):
+        prices = self.two_periods()
+        t = {**usage(2_000_000, requests=2),
+             "days": {"2026-11-30": usage(1_000_000), "2026-12-01": usage(1_000_000)}}
+        self.assertEqual(self.tr.cost({"m": t}, prices), (3.0, []))
+
+    def test_old_record_without_days_uses_the_given_day(self):
+        prices = self.two_periods()
+        self.assertEqual(self.tr.cost({"m": usage(1_000_000)}, prices, "2026-11-30"), (1.0, []))
+        self.assertEqual(self.tr.cost({"m": usage(1_000_000)}, prices, "2026-12-01"), (2.0, []))
+        self.assertEqual(self.tr.record_day({"end": "2026-11-30T20:00:00-05:00", "ts": "x"}), "2026-12-01")
+        self.assertEqual(self.tr.record_day({"end": None, "ts": "2026-11-29T10:00:00+01:00"}), "2026-11-29")
+
+    def test_adding_a_new_period_does_not_change_the_cost_of_earlier_usage(self):
+        # requisito del cliente: el coste pasado no cambia al añadir un precio nuevo con su "from"
+        nov = [record("s1", "main", "main", {"m": usage(1_000_000)}, end="2026-11-20T10:00:00Z"),
+               record("s2", "main", "main", {"m": {**usage(1_000_000), "days": {"2026-11-25": usage(1_000_000)}}},
+                      end="2026-11-25T10:00:00Z")]
+        dec = [record("s3", "main", "main", {"m": {**usage(1_000_000), "days": {"2026-12-02": usage(1_000_000)}}},
+                      end="2026-12-02T10:00:00Z")]
+
+        def usd(records, prices):
+            return self.tr.build_table("model", records, prices)["total"][-1]["sort"]
+
+        before = self.write_prices({"m": price(1.0)})
+        nov_before, dec_before = usd(nov, before), usd(dec, before)
+        after = self.two_periods()
+        self.assertEqual((nov_before, dec_before), (2.0, 1.0))
+        self.assertEqual(usd(nov, after), nov_before)
+        self.assertEqual(usd(dec, after), 2.0)
+
+    def test_report_notes(self):
+        prices = self.write_prices({"m": [{"from": "2026-06-01", **price(1.0)}],
+                                    "bad": [{"from": "2026-13-01", **price(1.0)}]})
+        records = [record("s1", "main", "main", {"m": usage(1_000_000)}, end="2026-05-01T10:00:00Z"),
+                   record("s2", "main", "main", {"bad": usage(1)})]
+        notes = "\n".join(self.tr.report_notes(records, prices))
+        # "m" antes de su primer "from" se cobra con el periodo más antiguo: no es "sin precio"
+        self.assertEqual(self.tr.build_table("model", records[:1], prices)["total"][-1]["sort"], 1.0)
+        self.assertIn("Models without a price (counted as 0 USD): bad.", notes)
+        self.assertIn("prices.json: bad ignored: invalid from '2026-13-01'", notes)
+
+    def test_bundled_flat_prices_give_the_same_usd_with_and_without_days(self):
+        prices = self.tr.load_prices()
+        u = usage(1_000_000, 50_000, cr=200_000)
+        old = record("s1", "main", "main", {"claude-opus-5-5": u})
+        new = record("s2", "main", "main", {"claude-opus-5-5": {**u, "days": {"2026-11-01": u}}})
+        usd = [self.tr.build_table("model", [r], prices)["total"][-1]["sort"] for r in (old, new)]
+        self.assertGreater(usd[0], 0)
+        self.assertEqual(usd[0], usd[1])
+
+    def test_hook_records_days_and_the_right_cost(self):
+        self.two_periods()
+        t = self.write_transcript([request(1, NOV, inp=1_000_000), request(2, DEC, inp=1_000_000)])
+        payload = json.dumps({"hook_event_name": "Stop", "session_id": "abcdef12-0002",
+                              "transcript_path": str(t), "cwd": "/work/demo"})
+        self.assertEqual(self.run_cli("hook", stdin=payload).returncode, 0)
+        r = json.loads((self.base / "token-log.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(sorted(r["models"]["m"]["days"]), ["2026-11-30", "2026-12-01"])
+        self.assertAlmostEqual(r["cost_usd"], 3.0, places=6)
+
+    def test_import_replaces_an_old_record_without_days(self):
+        self.two_periods()
+        project = Path(self.home) / ".claude" / "projects" / "demo"
+        project.mkdir(parents=True)
+        (project / "s1.jsonl").write_text("".join(json.dumps(e) + "\n" for e in
+                                                  [request(1, NOV, inp=10), request(2, DEC, inp=20)]),
+                                          encoding="utf-8")
+        self.write_log([record("s1", "main", "main", {"m": usage(30, requests=2)})])
+        self.assertEqual(self.run_cli("import").returncode, 0)
+        recs = self.tr.latest_records()
+        self.assertEqual(len(recs), 1)
+        self.assertIn("days", recs[0]["models"]["m"])
 
 
 if __name__ == "__main__":

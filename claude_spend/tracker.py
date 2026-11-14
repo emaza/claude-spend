@@ -28,7 +28,7 @@ import urllib.parse
 import webbrowser
 from collections import defaultdict
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 
 BASE = os.path.expanduser("~/.claude/claude-spend")
 LOG = os.path.join(BASE, "token-log.jsonl")
@@ -59,9 +59,10 @@ NO_MATCH = "No records match these filters."
 def parse_transcript(path, skip_sidechain=False, prices=None):
     """Suma el uso por modelo de un transcript JSONL (sin contar dos veces un mensaje).
 
-    Si el precio del modelo tiene "tiers" (precio distinto según la longitud del prompt),
-    las peticiones que superan un umbral se suman además en t["tiers"][str(umbral)],
-    porque el tramo se decide petición a petición y no se puede deducir del total.
+    Además de los totales, cada petición se suma en t["days"][día UTC], para cobrar cada día
+    con el periodo de precio vigente ese día. Si el periodo tiene "tiers" (precio distinto
+    según la longitud del prompt), las peticiones que superan un umbral se suman además en
+    t["days"][día]["tiers"][str(umbral)], porque el tramo se decide petición a petición.
     """
     by_id = {}
     cwd = None
@@ -87,9 +88,11 @@ def parse_transcript(path, skip_sidechain=False, prices=None):
             if ts:
                 first = first or ts
                 last = ts
-            by_id[m.get("id") or e.get("uuid")] = (m["model"], u)
+            # sin timestamp propio: el último visto hasta aquí (o, más abajo, el último del transcript)
+            by_id[m.get("id") or e.get("uuid")] = (m["model"], u, ts or last)
     models = {}
-    for model, u in by_id.values():
+    for model, u, ts in by_id.values():
+        day = utc_day(ts or last) or utc_today()
         cc = u.get("cache_creation") or {}
         w1h = cc.get("ephemeral_1h_input_tokens") or 0
         w5m = cc.get("ephemeral_5m_input_tokens")
@@ -102,12 +105,13 @@ def parse_transcript(path, skip_sidechain=False, prices=None):
             "cache_write_5m": max(w5m, 0),
             "cache_write_1h": w1h,
         }
-        buckets = [models.setdefault(model, dict.fromkeys(FIELDS, 0) | {"requests": 0})]
+        t = models.setdefault(model, dict.fromkeys(FIELDS, 0) | {"requests": 0, "days": {}})
+        buckets = [t, t["days"].setdefault(day, dict.fromkeys(FIELDS, 0) | {"requests": 0})]
         # longitud del prompt = todos los tokens de entrada, también lecturas y escrituras de caché
         prompt = req["input"] + req["cache_read"] + req["cache_write_5m"] + req["cache_write_1h"]
-        tier = tier_for(price_for(model, prices or {}), prompt)
+        tier = tier_for(price_for(model, prices or {}, day), prompt)
         if tier:
-            buckets.append(buckets[0].setdefault("tiers", {}).setdefault(
+            buckets.append(buckets[1].setdefault("tiers", {}).setdefault(
                 str(tier["prompt_over"]), dict.fromkeys(FIELDS, 0) | {"requests": 0}))
         for t in buckets:
             for k in FIELDS:
@@ -123,24 +127,101 @@ def prices_path():
     return PRICES if os.path.exists(PRICES) else BUNDLED_PRICES
 
 
-def load_prices():
+def utc_today():
+    return dt.datetime.now(dt.timezone.utc).date().isoformat()
+
+
+def utc_day(ts):
+    """Timestamp ISO ('Z', con desfase o sin zona, que se toma como UTC) -> 'YYYY-MM-DD' en UTC, o None."""
+    if not isinstance(ts, str) or not ts:
+        return None
     try:
-        with open(prices_path(), encoding="utf-8") as f:
-            return {k: v for k, v in json.load(f).items() if not k.startswith("_")}
-    except (OSError, ValueError):
-        return {}
+        d = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=dt.timezone.utc)
+    return d.astimezone(dt.timezone.utc).date().isoformat()
 
 
-def price_for(model, prices):
+def valid_day(v):
+    if not isinstance(v, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+        return False
+    try:
+        dt.date.fromisoformat(v)
+    except ValueError:
+        return False
+    return True
+
+
+def normalize_prices(raw):
+    """JSON de prices.json -> ({modelo: [periodos ordenados por "from"]}, [problemas]). Nunca lanza excepciones.
+
+    Una entrada plana es un único periodo. Solo el primer periodo puede no llevar "from" (= desde siempre).
+    Un modelo con un periodo inválido se descarta entero (queda "sin precio") y se anota el problema.
+    """
+    if not isinstance(raw, dict):
+        return {}, ["prices.json: ignored, it is not a JSON object"]
+    prices, problems = {}, []
+    for model, entry in raw.items():
+        if not isinstance(model, str) or model.startswith("_"):
+            continue
+        periods = [entry] if isinstance(entry, dict) else entry
+        if not isinstance(periods, list) or not periods:
+            problems.append(f"prices.json: {model} ignored: expected a price object or a non-empty list")
+            continue
+        if not all(isinstance(p, dict) for p in periods):
+            problems.append(f"prices.json: {model} ignored: every period must be an object")
+            continue
+        bad = next((p["from"] for p in periods if p.get("from") is not None and not valid_day(p["from"])), None)
+        if bad is not None:
+            problems.append(f"prices.json: {model} ignored: invalid from '{bad}'")
+            continue
+        starts = [p.get("from") for p in periods]
+        if len(set(starts)) != len(starts):
+            problems.append(f"prices.json: {model} ignored: duplicate from")
+            continue
+        prices[model] = sorted(({**p, "from": p.get("from")} for p in periods),
+                               key=lambda p: p["from"] or "")
+    return prices, problems
+
+
+def load_prices():
+    """Precios normalizados: {modelo: [periodos]} (ver normalize_prices)."""
+    return normalize_prices(read_json(prices_path()))[0]
+
+
+def prices_problems():
+    """Problemas de validación del prices.json en uso, para las notas del informe."""
+    return normalize_prices(read_json(prices_path()))[1]
+
+
+def period_for(periods, day):
+    """Periodo vigente en `day` (YYYY-MM-DD; None = hoy en UTC).
+
+    Un día anterior al primer "from" usa el periodo más antiguo. Solo devuelve None sin periodos.
+    """
+    if not periods:
+        return None
+    day = day or utc_today()
+    best = periods[0]
+    for p in periods[1:]:
+        if p["from"] <= day:
+            best = p
+    return best
+
+
+def price_for(model, prices, day=None):
+    """Precio (periodo) de `model` vigente en `day`, o None si el modelo no tiene precio."""
     if model in prices:
-        return prices[model]
+        return period_for(prices[model], day)
     # ids con sufijo (fechas, [1m], -fast…): coincidencia por prefijo más largo.
     # Si lo que sobra empieza por un número de versión corto ("-2" en claude-fable-5-2)
     # es otro modelo, no una variante: mejor "sin precio" que el precio de otro.
     def variant(k):
         return model.startswith(k) and not re.match(r"-\d{1,3}(?!\d)", model[len(k):])
     best = max((k for k in prices if variant(k)), key=len, default=None)
-    return prices.get(best)
+    return period_for(prices.get(best), day)
 
 
 def tier_for(p, prompt):
@@ -170,24 +251,41 @@ def prices_note():
     return line + ". Source: " + meta.get("_source", "-")
 
 
-def cost(models, prices):
+def bucket_cost(t, p):
+    """USD de un bucket de tokens (con sus "tiers") al precio del periodo p."""
+    total = 0.0
+    base = {k: t.get(k, 0) for k in FIELDS}
+    for threshold, tt in (t.get("tiers") or {}).items():
+        # si el tramo ya no está en prices.json, esos tokens se cobran a precio base
+        pt = next((x for x in p.get("tiers", []) if str(x.get("prompt_over")) == threshold), None)
+        if not pt:
+            continue
+        total += sum(tt.get(k, 0) * pt.get(k, 0) for k in FIELDS) / 1_000_000
+        for k in FIELDS:
+            base[k] -= tt.get(k, 0)
+    return total + sum(base[k] * p.get(k, 0) for k in FIELDS) / 1_000_000
+
+
+def cost(models, prices, day=None):
+    """(USD, modelos sin precio). Con "days", cada día se cobra con su periodo; sin ellos
+    (registros anteriores a 0.5.0), los totales se cobran con el periodo vigente en `day`."""
     total, unknown = 0.0, []
     for model, t in models.items():
-        p = price_for(model, prices)
-        if not p:
-            unknown.append(model)
-            continue
-        base = {k: t.get(k, 0) for k in FIELDS}
-        for threshold, tt in (t.get("tiers") or {}).items():
-            # si el tramo ya no está en prices.json, esos tokens se cobran a precio base
-            pt = next((x for x in p.get("tiers", []) if str(x.get("prompt_over")) == threshold), None)
-            if not pt:
+        days = t.get("days")
+        buckets = days.items() if isinstance(days, dict) and days else [(day, t)]
+        for d, bucket in buckets:
+            p = price_for(model, prices, d)
+            if not p:
+                if model not in unknown:
+                    unknown.append(model)
                 continue
-            total += sum(tt.get(k, 0) * pt.get(k, 0) for k in FIELDS) / 1_000_000
-            for k in FIELDS:
-                base[k] -= tt.get(k, 0)
-        total += sum(base[k] * p.get(k, 0) for k in FIELDS) / 1_000_000
+            total += bucket_cost(bucket, p)
     return round(total, 6), unknown
+
+
+def record_day(r):
+    """Día UTC con el que se cobra un registro sin "days": el de "end" o, si falta, el de "ts"."""
+    return utc_day(r.get("end") or r.get("ts"))
 
 
 def read_json(path):
@@ -513,7 +611,7 @@ def build_table(by, records, prices):
             row = rows[model if by == "model" else group_key(r, by)]
             for f in FIELDS:
                 row[f] += t.get(f, 0)
-            row["usd"] += cost({model: t}, prices)[0]
+            row["usd"] += cost({model: t}, prices, record_day(r))[0]
         if by != "model":
             rows[group_key(r, by)]["runs"] += 1
 
@@ -626,10 +724,11 @@ def print_table(table, sort=None):
 
 def report_notes(records, prices):
     notes = []
-    unpriced = sorted({m for r in records for m in r.get("models", {}) if not price_for(m, prices)})
+    unpriced = sorted({m for r in records for m in cost(r.get("models", {}), prices, record_day(r))[1]})
     if unpriced:
         notes.append("⚠ Models without a price (counted as 0 USD): " + ", ".join(unpriced)
                      + ". Add them to prices.json.")
+    notes += ["⚠ " + p for p in prices_problems()]
     notes.append("USD = estimate at list price (prices.json); "
                  "with a Pro/Max subscription it is not what you pay.")
     notes.append(prices_note())
