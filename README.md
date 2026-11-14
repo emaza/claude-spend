@@ -111,21 +111,41 @@ Mouse clicks depend on the terminal: most modern ones work, but some report doub
 `claude-spend --web` serves the report on `http://127.0.0.1:8765` and opens it in your default browser. It only listens on your own machine and only reads the log; reloading the page (or pressing Refresh) recalculates it from the current data. The tables can be filtered by date and project. Click a row to filter every table by it: after clicking a project, for example, the other tabs show only that project's sessions, models, days and tasks. The page stays on the same tab. The filters add up; each one appears as a label above the tables, and clicking the label removes it. The page address keeps the filters, the tab and the sort order, so reloading keeps the view and the browser's Back button undoes the last filter. Press `Ctrl+C` to stop it.
 
 ## Plan usage
-With a Pro or Max subscription, the report, the terminal view and the web page can also show how much of your current session (5-hour window) and your weekly limit you have used, and when each one resets. Claude Code passes these numbers to the status line command, so claude-spend saves them from there to `~/.claude/claude-spend/limits.json`. Nothing goes over the network.
+With a Pro or Max subscription, claude-spend can also show how much of your current session (5-hour window) and your weekly limit you have used, and when each one resets:
 
-If you already have a status line script, add this line right after it reads its input (`input=$(cat)`):
+```
+Current session:  89% used | Resets at 1:30
+Weekly:           64% used | Resets Wednesday, 22:00
+Updated today at 1:05
+```
+
+**This needs one extra step: the hooks are not enough.** Claude Code only gives these numbers to the [status line](https://docs.claude.com/en/docs/claude-code/statusline) command, so the status line has to hand them to `claude-spend limits`, which saves them to `~/.claude/claude-spend/limits.json`. Until you do one of the two options below, claude-spend shows the spend tables but not the plan usage. Nothing goes over the network.
+
+Look for `"statusLine"` in `~/.claude/settings.json`:
+
+**A. You don't have a `"statusLine"`.** Add this to `~/.claude/settings.json`, merged with what you already have:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "claude-spend limits" }
+}
+```
+
+`claude-spend limits` prints nothing, so the status line in Claude Code stays empty.
+
+**B. You already have a `"statusLine"` that runs your own script.** Keep it, and add this line to the script right after it reads its input (in bash, usually `input=$(cat)`):
 
 ```bash
 printf '%s' "$input" | claude-spend limits >/dev/null 2>&1 &
 ```
 
-If you don't have one, this is enough in `~/.claude/settings.json`:
+It passes the same input to claude-spend in the background, and your status line keeps working as before.
 
-```json
-{ "statusLine": { "type": "command", "command": "claude-spend limits" } }
-```
+**Check it:** use `claude` in a terminal, send a message, and run `cat ~/.claude/claude-spend/limits.json`. If the file is there, `claude-spend` shows the plan usage above the tables.
 
-The numbers are as fresh as the last time Claude Code refreshed the status line, and every view shows when that was ("Updated today at 1:05"). A window whose reset time has passed shows 0%.
+Good to know:
+- The numbers update only when Claude Code refreshes the status line, which happens in the `claude` terminal app. The VS Code extension does not run the status line, so working only there does not update them.
+- Every view shows when the numbers were saved ("Updated today at 1:05"). A window whose reset time has already passed shows 0%.
 
 ## Data
 The log is stored in `~/.claude/claude-spend/token-log.jsonl`. That file has your data and is not uploaded to the repository. It is append-only: each line is a snapshot of one agent in one session, and the report keeps the latest one. Keep this file if you want a long-term history, because Claude Code deletes old transcripts after a while and `--import` can only rebuild what is still on disk.
