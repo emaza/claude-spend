@@ -426,3 +426,52 @@ class WebTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LimitsTests(Base):
+    def payload(self, now, five=86, week=64):
+        return json.dumps({"rate_limits": {
+            "five_hour": {"used_percentage": five, "resets_at": now + 3600},
+            "seven_day": {"used_percentage": week, "resets_at": now + 3 * 86400}}})
+
+    def test_saves_and_loads(self):
+        import time
+        now = time.time()
+        r = self.run_cli("limits", stdin=self.payload(now))
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        limits = self.tr.load_limits(now)
+        self.assertEqual([(w["id"], w["pct"]) for w in limits], [("five_hour", 86.0), ("seven_day", 64.0)])
+        self.assertTrue(limits[1]["resets"].startswith("Resets "))
+        self.assertTrue(limits[0]["updated"].startswith("Updated today at "))
+        self.assertAlmostEqual(limits[0]["updated_at"], now, delta=60)
+
+    def test_no_rate_limits_or_bad_json_writes_nothing(self):
+        for stdin in ('{"model": {}}', "not json"):
+            self.assertEqual(self.run_cli("limits", stdin=stdin).returncode, 0)
+        self.assertFalse((self.base / "limits.json").exists())
+        self.assertIsNone(self.tr.load_limits())
+
+    def test_expired_window_shows_zero(self):
+        import time
+        now = time.time()
+        self.run_cli("limits", stdin=self.payload(now))
+        limits = self.tr.load_limits(now + 2 * 3600)
+        self.assertEqual((limits[0]["pct"], limits[0]["resets"]), (0.0, "Not started"))
+        self.assertEqual(limits[1]["pct"], 64.0)
+
+    def test_fmt_reset_today_and_other_day(self):
+        import datetime as dt
+        noon = dt.datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+        today = noon.replace(hour=13, minute=30).timestamp()
+        self.assertEqual(self.tr.fmt_reset(today, noon.timestamp()), "Resets at 13:30")
+        other = (noon + dt.timedelta(days=2)).replace(hour=22)
+        self.assertEqual(self.tr.fmt_reset(other.timestamp(), noon.timestamp()),
+                         f"Resets {other.strftime('%A')}, 22:00")
+
+    def test_report_and_api_include_limits(self):
+        import time
+        self.run_cli("limits", stdin=self.payload(time.time()))
+        self.assertEqual(len(self.tr.report_data()["limits"]), 2)
+        out = self.run_cli("report").stdout
+        self.assertIn("Current session", out)
+        self.assertIn("Updated today at", out)

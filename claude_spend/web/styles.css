@@ -42,3 +42,17 @@ tfoot td { font-weight:700; border-bottom:0; background:var(--head); }
 .notes { margin:16px 0 0; padding:0; list-style:none; color:var(--muted); font-size:13px; }
 .notes li { margin-bottom:4px; }
 .err { color:#b91c1c; }
+.limits { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:20px; }
+.limits[hidden] { display:none; }
+.limit { flex:1 1 300px; max-width:440px; border:1px solid var(--line); border-radius:8px; padding:8px 12px;
+         background:var(--head); }
+.limit .lh { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; margin-bottom:6px; }
+.limit .lt { font-weight:600; }
+.limit .sep { color:var(--muted); }
+.meter { height:8px; border-radius:999px; background:var(--line); overflow:hidden; }
+.meter span { display:block; height:100%; background:var(--accent); border-radius:999px; }
+.limit.warn .meter span { background:#d97706; }
+.limit.crit .meter span { background:#dc2626; }
+.limit .pct { font-variant-numeric:tabular-nums; }
+.limit .rs { color:var(--muted); font-size:13px; }
+.limits .upd { flex-basis:100%; margin:0; color:var(--muted); font-size:13px; }
