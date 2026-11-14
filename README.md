@@ -110,6 +110,23 @@ Mouse clicks depend on the terminal: most modern ones work, but some report doub
 ### Web page
 `claude-spend --web` serves the report on `http://127.0.0.1:8765` and opens it in your default browser. It only listens on your own machine and only reads the log; reloading the page (or pressing Refresh) recalculates it from the current data. The tables can be filtered by date and project. Click a row to filter every table by it: after clicking a project, for example, the other tabs show only that project's sessions, models, days and tasks. The page stays on the same tab. The filters add up; each one appears as a label above the tables, and clicking the label removes it. The page address keeps the filters, the tab and the sort order, so reloading keeps the view and the browser's Back button undoes the last filter. Press `Ctrl+C` to stop it.
 
+## Plan usage
+With a Pro or Max subscription, the report, the terminal view and the web page can also show how much of your current session (5-hour window) and your weekly limit you have used, and when each one resets. Claude Code passes these numbers to the status line command, so claude-spend saves them from there to `~/.claude/claude-spend/limits.json`. Nothing goes over the network.
+
+If you already have a status line script, add this line right after it reads its input (`input=$(cat)`):
+
+```bash
+printf '%s' "$input" | claude-spend limits >/dev/null 2>&1 &
+```
+
+If you don't have one, this is enough in `~/.claude/settings.json`:
+
+```json
+{ "statusLine": { "type": "command", "command": "claude-spend limits" } }
+```
+
+The numbers are as fresh as the last time Claude Code refreshed the status line, and every view shows when that was ("Updated today at 1:05"). A window whose reset time has passed shows 0%.
+
 ## Data
 The log is stored in `~/.claude/claude-spend/token-log.jsonl`. That file has your data and is not uploaded to the repository. It is append-only: each line is a snapshot of one agent in one session, and the report keeps the latest one. Keep this file if you want a long-term history, because Claude Code deletes old transcripts after a while and `--import` can only rebuild what is still on disk.
 
@@ -118,6 +135,12 @@ Running `--import` again is safe: it never counts a session twice. The total can
 The amounts are an estimate at list price. If you use a Pro or Max subscription, it is not what you pay. Prices change: check `prices.json` against [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and update it (and `_price_date`) when they do; the report warns when the prices are more than 90 days old.
 
 claude-spend uses `~/.claude/claude-spend/prices.json` if that file exists, and otherwise the `prices.json` that comes with the package. To use your own prices, copy the bundled file to `~/.claude/claude-spend/prices.json` and edit that copy. It replaces the bundled list completely; the two are not merged.
+
+### Updating
+- With uv or pipx: `uv tool upgrade claude-spend` (or `pipx upgrade claude-spend`).
+- With the manual install: run `git pull` in your clone and copy the files again, as in the install steps (`tracker.py`, `prices.json` and the `web` folder). If you have your own `prices.json`, leave out `prices.json` so your copy is kept.
+
+Check the version with `claude-spend --version`. Your data stays where it is.
 
 ### Upgrading from 0.1.x
 Before 0.2.0 the data folder was `~/.claude/token-tracker`. Move it to the new name and update the paths in your hooks (and in `~/.local/bin/claude-spend` if you used the manual install):

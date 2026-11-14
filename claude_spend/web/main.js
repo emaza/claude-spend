@@ -87,7 +87,50 @@
     }
   }
 
+  // Plan usage (5-hour session and weekly), saved from the status line by `claude-spend limits`.
+  function renderLimits() {
+    const box = $("limits"), limits = (data && data.limits) || [];
+    box.replaceChildren();
+    box.hidden = !limits.length;
+    const now = new Date();
+    limits.forEach((w) => {
+      const card = el("div", undefined, "limit" + (w.pct >= 95 ? " crit" : w.pct >= 80 ? " warn" : ""));
+      const bar = el("div", undefined, "meter"), fill = el("span");
+      fill.style.width = Math.max(0, Math.min(100, w.pct)) + "%";
+      bar.append(fill);
+      bar.setAttribute("role", "meter");
+      bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
+      bar.setAttribute("aria-valuenow", String(Math.round(w.pct)));
+      bar.setAttribute("aria-label", w.label);
+      let resets = w.resets;
+      if (w.resets_at) {   // format in the browser's locale
+        const d = new Date(w.resets_at * 1000);
+        const hm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        resets = d.toDateString() === now.toDateString() ? `Resets at ${hm}`
+          : `Resets ${d.toLocaleDateString([], { weekday: "long" })}, ${hm}`;
+      }
+      const head = el("div", undefined, "lh");   // "Current session: 89% used | Resets at 1:30"
+      head.append(el("span", w.label + ":", "lt"), el("span", Math.round(w.pct) + "% used", "pct"),
+                  el("span", "|", "sep"), el("span", resets, "rs"));
+      card.append(head, bar);
+      box.append(card);
+    });
+    const at = limits.length && limits[0].updated_at;
+    if (limits.length) {   // when the status line last saved these numbers
+      let text = limits[0].updated;
+      if (at) {
+        const d = new Date(at * 1000);
+        const hm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        text = "Updated " + (d.toDateString() === now.toDateString() ? "today" : d.toLocaleDateString())
+          + " at " + hm;
+        if (now - d > 3600 * 1000) text += " · open claude in a terminal to refresh";
+      }
+      box.append(el("p", text, "upd"));
+    }
+  }
+
   function render() {
+    renderLimits();
     const tabs = $("tabs"), out = $("out"), notes = $("notes");
     tabs.replaceChildren(); notes.replaceChildren();
     renderChips();

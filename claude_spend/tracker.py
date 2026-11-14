@@ -3,6 +3,7 @@
 
 Usage:
   tracker.py hook                  # called by the Stop and SubagentStop hooks (JSON on stdin)
+  tracker.py limits                # called from the status line: saves the plan usage (JSON on stdin)
   tracker.py import                # import every transcript found on disk into the log
   tracker.py report [options]      # print the spend tables (the wrapper command is: claude-spend)
   tracker.py --interactive         # tables in the terminal; click a header to sort
@@ -27,11 +28,13 @@ import urllib.parse
 import webbrowser
 from collections import defaultdict
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 BASE = os.path.expanduser("~/.claude/claude-spend")
 LOG = os.path.join(BASE, "token-log.jsonl")
 ERRLOG = os.path.join(BASE, "errors.log")
+LIMITS = os.path.join(BASE, "limits.json")  # last plan usage that Claude Code passed to the status line
+LIMIT_WINDOWS = (("five_hour", "Current session"), ("seven_day", "Weekly"))
 PRICES = os.path.join(BASE, "prices.json")  # el del usuario: si existe, manda
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")  # index.html, styles.css y main.js
 # lo único que sirve --web del disco: ruta pedida -> (archivo, Content-Type)
@@ -277,6 +280,93 @@ def cmd_hook(_args):
         with open(ERRLOG, "a", encoding="utf-8") as f:
             f.write(f"{dt.datetime.now().isoformat()}\n{traceback.format_exc()}\n")
     return 0
+
+
+# -------------------------------------------------------------------- limits
+def cmd_limits(_args):
+    """Saves rate_limits from the status line JSON. Silent and never fails, like the hook."""
+    try:
+        data = json.load(sys.stdin)
+        limits = data.get("rate_limits") if isinstance(data, dict) else None
+        if isinstance(limits, dict) and limits:
+            os.makedirs(BASE, exist_ok=True)
+            tmp = f"{LIMITS}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"saved_at": time.time(), "rate_limits": limits}, f)
+            os.replace(tmp, LIMITS)
+    except Exception:
+        os.makedirs(BASE, exist_ok=True)
+        with open(ERRLOG, "a", encoding="utf-8") as f:
+            f.write(f"{dt.datetime.now().isoformat()}\n{traceback.format_exc()}\n")
+    return 0
+
+
+def epoch(v):
+    """resets_at can come as epoch seconds or as an ISO string."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str) and v:
+        try:
+            return float(v)
+        except ValueError:
+            return local_dt(v).timestamp()
+    return None
+
+
+def load_limits(now=None):
+    """[{id, label, pct, resets_at (epoch), resets (text)}] or None if there is nothing saved."""
+    try:
+        with open(LIMITS, encoding="utf-8") as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        return None
+    now = time.time() if now is None else now
+    out = []
+    for key, label in LIMIT_WINDOWS:
+        w = (saved.get("rate_limits") or {}).get(key)
+        if not isinstance(w, dict) or w.get("used_percentage") is None:
+            continue
+        try:
+            reset = epoch(w.get("resets_at"))
+            pct = float(w["used_percentage"])
+        except (TypeError, ValueError):
+            continue
+        if reset is not None and reset <= now:  # the window has already restarted
+            pct = 0.0
+            reset = None
+        out.append({"id": key, "label": label, "pct": pct, "resets_at": reset,
+                    "updated_at": saved.get("saved_at"), "updated": fmt_updated(saved.get("saved_at"), now),
+                    "resets": fmt_reset(reset, now) if reset else "Not started"})
+    return out or None
+
+
+def fmt_reset(ts, now=None):
+    when = dt.datetime.fromtimestamp(ts).astimezone()
+    today = dt.datetime.fromtimestamp(time.time() if now is None else now).astimezone().date()
+    hm = f"{when.hour}:{when.minute:02d}"
+    if when.date() == today:
+        return f"Resets at {hm}"
+    return f"Resets {when.strftime('%A')}, {hm}"
+
+
+def fmt_updated(ts, now=None):
+    if not isinstance(ts, (int, float)):
+        return "Updated: unknown"
+    when = dt.datetime.fromtimestamp(ts).astimezone()
+    today = dt.datetime.fromtimestamp(time.time() if now is None else now).astimezone().date()
+    day = "today" if when.date() == today else when.strftime("%Y-%m-%d")
+    return f"Updated {day} at {when.hour}:{when.minute:02d}"
+
+
+def limits_lines(limits):
+    lines = []
+    for w in limits or []:
+        filled = round(max(0.0, min(100.0, w["pct"])) / 10)
+        lines.append(f"{w['label']:<16} [{'█' * filled}{'░' * (10 - filled)}] "
+                     f"{w['pct']:>3.0f}% used · {w['resets']}")
+    if lines:
+        lines.append(limits[0]["updated"] + " (from the status line)")
+    return lines
 
 
 # -------------------------------------------------------------------- import
@@ -556,6 +646,8 @@ def cmd_report(args):
             return 2
     prices = load_prices()
     records = filtered_records(args.since, args.project)
+    for line in limits_lines(load_limits()):
+        print(line)
     if not records:
         print(NO_RECORDS)
         return 0
@@ -622,6 +714,7 @@ def tui_main(scr, tables, parsed):
     layouts = [tui_layout(t) for t in tables]
     sorts = [sort_for(t, parsed) for t in tables]
     cur, sel, scroll = 0, 0, 0
+    limits = load_limits()
     last_sort = (None, 0.0)  # (columna, instante): un doble clic no debe ordenar dos veces
 
     def put(y, x, text, attr=0):
@@ -647,7 +740,12 @@ def tui_main(scr, tables, parsed):
     while True:
         t, (widths, xs) = tables[cur], layouts[cur]
         h, w = scr.getmaxyx()
-        body_h = h - 6
+        # plan usage: beside the tabs if it fits, otherwise on its own line above them
+        lim = "   ".join(f"{x['label']} {x['pct']:.0f}% · {x['resets']}" for x in limits or [])
+        full = lim + (f"   ({limits[0]['updated']})" if limits else "")
+        beside = tab_spans(tables)[-1][1] + 4 + len(t["title"])
+        top = 0 if not lim or w - len(full) - 1 > beside else 1
+        body_h = h - 6 - top
         scr.erase()
         if h < 8 or w < 24:
             put(0, 0, "Terminal too small")
@@ -656,16 +754,20 @@ def tui_main(scr, tables, parsed):
             rows = sort_rows(t, *sorts[cur])
             scroll = max(0, min(scroll, len(rows) - body_h))
             for i, (a, b) in enumerate(tab_spans(tables)):
-                put(0, a, f" {tables[i]['cols'][0]['name']} ", curses.A_REVERSE if i == cur else curses.A_BOLD)
-            put(0, tab_spans(tables)[-1][1] + 2, t["title"], curses.A_DIM)
+                put(top, a, f" {tables[i]['cols'][0]['name']} ", curses.A_REVERSE if i == cur else curses.A_BOLD)
+            put(top, tab_spans(tables)[-1][1] + 2, t["title"], curses.A_DIM)
+            if top:
+                put(0, 0, full if len(full) < w else lim, curses.A_BOLD)
+            elif lim:
+                put(0, w - len(full) - 1, full, curses.A_BOLD)
             for i, c in enumerate(t["cols"]):
                 name = c["name"] + ((" ▼" if sorts[cur][1] else " ▲") if sorts[cur][0] == i else "")
                 attr = curses.A_BOLD | (curses.A_REVERSE if i == sel else 0)
-                put(1, xs[i], cell_text(c, name, widths[i]), attr)
-            put(2, 0, "  ".join("─" * wd for wd in widths))
+                put(top + 1, xs[i], cell_text(c, name, widths[i]), attr)
+            put(top + 2, 0, "  ".join("─" * wd for wd in widths))
             for r, row in enumerate(rows[scroll:scroll + body_h]):
                 for i, c in enumerate(row):
-                    put(3 + r, xs[i], cell_text(t["cols"][i], c["text"], widths[i]))
+                    put(top + 3 + r, xs[i], cell_text(t["cols"][i], c["text"], widths[i]))
             put(h - 3, 0, "  ".join("─" * wd for wd in widths))
             for i, c in enumerate(t["total"]):
                 put(h - 2, xs[i], cell_text(t["cols"][i], c["text"], widths[i]), curses.A_BOLD)
@@ -686,11 +788,11 @@ def tui_main(scr, tables, parsed):
                 scroll += 3
             elif state & wheel_up:
                 scroll -= 3
-            elif state & click and my == 0:
+            elif state & click and my == top:
                 for i, (a, b) in enumerate(tab_spans(tables)):
                     if a <= mx < b and i != cur:
                         cur, sel, scroll = i, 0, 0
-            elif state & click and my == 1:
+            elif state & click and my == top + 1:
                 idx = column_at(widths, xs, mx)
                 if idx is not None:
                     do_sort(idx)
@@ -758,8 +860,8 @@ def report_data(since=None, project=None, filters=None):
     records = filtered_records(since, project, filters)
     if not records:
         message = NO_MATCH if (since or project or filters) and latest_records() else NO_RECORDS
-        return {"empty": True, "message": message, "tables": [], "notes": []}
-    return {"empty": False, "message": "", "notes": report_notes(records, prices),
+        return {"empty": True, "message": message, "tables": [], "notes": [], "limits": load_limits()}
+    return {"empty": False, "message": "", "notes": report_notes(records, prices), "limits": load_limits(),
             "tables": [build_table(by, records, prices) for by in GROUPS]}
 
 
@@ -842,7 +944,7 @@ def main():
     p = argparse.ArgumentParser(prog="claude-spend",
                                 description="Claude Code token spend by agent, project, model, day, session and task")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    p.add_argument("mode", nargs="?", default="report", choices=["report", "hook", "import"])
+    p.add_argument("mode", nargs="?", default="report", choices=["report", "hook", "import", "limits"])
     p.add_argument("--import", dest="do_import", action="store_true",
                    help="import the transcripts on disk first")
     p.add_argument("--by", action="append", choices=list(GROUPS) + ["all"],
@@ -865,6 +967,8 @@ def main():
         p.error("--interactive and --web cannot be used together")
     if args.mode == "hook":
         return cmd_hook(args)
+    if args.mode == "limits":
+        return cmd_limits(args)
     if args.mode == "import" or args.do_import:
         cmd_import(args)
         if args.mode == "import":
