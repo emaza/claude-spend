@@ -171,7 +171,8 @@ mv ~/.claude/token-tracker ~/.claude/claude-spend
 ### Uninstalling
 1. Remove the program: `uv tool uninstall claude-spend` (or `pipx uninstall claude-spend`). With the manual install, delete `~/.local/bin/claude-spend`, `~/.claude/claude-spend/tracker.py` and `~/.claude/claude-spend/web`.
 2. Remove the two claude-spend entries (`Stop` and `SubagentStop`) from the `hooks` block in `~/.claude/settings.json`, leaving any other hooks you have.
-3. Your data stays in `~/.claude/claude-spend` (the log and your `prices.json`, if you made one). If you install it again later, it picks up the same log. Delete that folder only if you don't want to keep the history.
+3. If you set up [plan usage](#plan-usage), undo it too, or Claude Code will keep running a command that no longer exists: with option A, delete the `"statusLine"` entry from `~/.claude/settings.json`; with option B, delete the `claude-spend limits` line from your status line script.
+4. Your data stays in `~/.claude/claude-spend` (the log, your `prices.json` if you made one, and `limits.json`). If you install it again later, it picks up the same log. Delete that folder only if you don't want to keep the history.
 
 ## Tests
 ```bash
